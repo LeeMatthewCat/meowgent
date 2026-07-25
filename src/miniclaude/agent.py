@@ -43,7 +43,7 @@ if __name__ == "__main__":
 
     while True: # 對話回圈
 
-        user_input = console.input("[bold blue]輸入對話...[/bold blue]") # 接受輸入
+        user_input = console.input("🔎 [bold blue]輸入對話...[/bold blue]") # 接受輸入
 
         # ----- 離開對話 -----
         if user_input == "q":
