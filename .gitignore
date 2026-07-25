@@ -1,0 +1,29 @@
+# 虛擬環境 (Virtual Environments)
+.venv/
+venv/
+ENV/
+env/
+
+# Python 快取與編譯產物
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 環境變數與機密資訊
+.env
+.env.local
+*.pem
+
+# IDE 與編輯器設定
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系統檔案
+.DS_Store
+Thumbs.db
