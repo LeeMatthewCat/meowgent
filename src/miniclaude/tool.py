@@ -3,12 +3,15 @@ import re
 import subprocess
 
 TOOL_REGISTRY = {} # 註冊表
-def tool_register(func): # 屬性裝飾器
-    TOOL_REGISTRY[func.__name__] = func
-    return func
+def tool_register(need_approval: bool = True): # 屬性裝飾器
+    def decorator(func):
+        func.need_approval = need_approval # 是否需要許可才能被模型使用
+        TOOL_REGISTRY[func.__name__] = func
+        return func
+    return decorator
 
 # ========== 工具 ==========
-@tool_register
+@tool_register(False)
 def read_file(file_path: str) -> str:
     """ 讀取文字檔 """
     try:
@@ -16,7 +19,7 @@ def read_file(file_path: str) -> str:
     except Exception as e:
         return f"Error: can't reading file {file_path}: {e}"
 
-@tool_register
+@tool_register(True)
 def write_file(file_path: str, content: str) -> str:
     """ 寫入到文字檔 """
     try:
@@ -30,7 +33,7 @@ def write_file(file_path: str, content: str) -> str:
     except Exception as e:
         return f"Error: can't writing file {file_path}: {e}"
 
-@tool_register
+@tool_register(True)
 def edit_file(file_path: str, old_content: str, new_content: str):
     """ 局部修改文字 """
     # ----- 讀 -----
@@ -55,7 +58,7 @@ def edit_file(file_path: str, old_content: str, new_content: str):
             except Exception as e:
                 return f"Error: can't writing(editing) file {file_path}: {e}"
 
-@tool_register
+@tool_register(False)
 def list_file(
     pattern: str, # Glob 規則
     base_path: str = "." # 搜尋起點
@@ -75,7 +78,7 @@ def list_file(
         return_files += f"\n\n... (Showing top 200 of {len(files)} files. Please use a more specific pattern to narrow down)."
     return return_files
 
-@tool_register              
+@tool_register(False)              
 def grep_search(
     pattern: str, # Regex 表達式 -> 要比對的文字
     base_path: str = "." # 搜尋起點
@@ -108,7 +111,7 @@ def grep_search(
     except Exception as e:
         return f"Error: can't find the path {base_path}"
 
-@tool_register    
+@tool_register(True) 
 def run_shell(command: str) -> str:
     """ 執行終端指令 """
 

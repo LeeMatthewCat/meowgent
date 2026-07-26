@@ -60,9 +60,14 @@ class OllamaProvider(LLMProvider):
 
                 # ----- 2. tool use -----
                 else:
+                    if think and thing_time is not None:
+                        thing_time = round(time.perf_counter() - thing_time, 1)
+                        console.print(f"💭 [bold blue]已思考 {thing_time} 秒...[/bold blue]")
+                        think = False # 防止重複計時
+                        live.update(Markdown(""))
+
                     for f in chunk.message.tool_calls:
                         tool_calls.append(ToolCall(f.function.name, dict(f.function.arguments)))
-                    
 
         # 按照 LLMResponse 的要求輸出
         if tool_calls:

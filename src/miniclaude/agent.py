@@ -8,7 +8,7 @@ from rich.markdown import Markdown
 import questionary
 from providers.gemini_provider import GeminiProvider
 from providers.ollama_provider import OllamaProvider
-from tool import execute_tool
+from tool import execute_tool, TOOL_REGISTRY
 
 load_dotenv() # 載入 .env 檔內的環境變數
 
@@ -61,19 +61,30 @@ if __name__ == "__main__":
 
                 response = provider.generate(history_messages)
 
-                if response.tool_calls:
+                if response.tool_calls: # 調用工具
 
                     tool_call_result = "execute tool result:"
                     for t in response.tool_calls:
 
+                        func = TOOL_REGISTRY.get(t.tool_name)
+                        if func and func.need_approval is True: # 函數存在且需要調用許可時
+                            approval = console.input(f"❓ [bold blue]是否允許模型調用 {t.tool_name} [y/n][/bold blue]")
+
+                            if approval.strip().lower() != "y": # tool use 調用被拒絕
+                                # 不分大小寫、去除前後空白
+
+                                tool_call_result += f"User rejected execution of {t.tool_name} for security reasons" + "\n"
+                                console.print("❕ [bold blue]此工具調用已被拒絕[/bold blue]")
+                                continue # 進到下一個 for t 迴圈（看下一個調用）或直接進到迴圈下面（迴圈已結束）
+
                         tool_call_result += (f"{t.tool_name} return:" + execute_tool(
                             tool_name=t.tool_name,
                             tool_args=t.args
-                        ) + "\n")
+                        ) + "\n") 
 
                     history_messages.append(
                         {
-                            "role": "user",
+                            "role": "tool",
                             "content": tool_call_result
                         }
                     ) # 工具加到多倫對話紀錄
