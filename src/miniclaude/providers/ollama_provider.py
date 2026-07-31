@@ -1,76 +1,63 @@
-from .base import ToolCall, LLMResponse, LLMProvider
-from typing import Optional
+from .base import ToolCall, LLMProvider, StreamChunk
+from typing import Optional, Iterator, List, Callable
 import ollama
-from rich.console import Console
-from rich.markdown import Markdown
 from tool import TOOL_REGISTRY
-from rich.live import Live
-import time
 
 class OllamaProvider(LLMProvider):
     def __init__(self, model_name: str):
-        super().__init__(model_provider="ollama", model_name=model_name)
+        super().__init__(model_name=model_name)
 
-    def generate(self, history_messages, tools: Optional[list] = None) -> LLMResponse:
+    def stream_generate(self, history_messages: list, tools:Optional[List[Callable]] = None) -> Iterator[StreamChunk]:
 
         # ========== A. 工具函數註冊表轉串列 ==========
-        tools_list = list(TOOL_REGISTRY.values())
+        tools_list = tools if tools is not None else list(TOOL_REGISTRY.values())
+        # 可傳入指定函數物件（在串列裡）則只使用它
 
-        # ========== B. 遞交給模型 ========== 
+        # ========== B. 格式更改 ==========
+        ollama_history_messsages = []
+        for msg  in history_messages: 
+            # msg 為 dict
+            if msg["role"] == "assistant" and "tool_calls" in msg: # 對模型提出的工具調用做格式處理
+                ollama_history_messsages.append(
+                    {
+                        "role": "assistant",
+                        "content": msg.get("content") or "",
+                        "tool_calls": [
+                            {
+                                "function":{
+                                    "name": call["name"],
+                                    "arguments": call["args"]
+                                }
+                            } for call in msg["tool_calls"]
+                        ]
+                    }
+                )
+            else: # 其餘不更改
+                ollama_history_messsages.append(msg)
+
+        # ========== C. 調用模型 ==========
         response = ollama.chat(
             model=self.model_name,
-            messages=history_messages,
+            messages=ollama_history_messsages,
             stream=True, # 流式輸出文字
-            tools=tools_list,
-            think=True
+            tools=tools_list
         )
+        # ========== D. 模型回傳處理 ==========
+        # 一次回傳一個 token 的內容，通過 agent.py 不斷呼叫達成流式輸出
+        for chunk in response:
+            if chunk.message.tool_calls: # tool use 時
 
-        # ========== C. 兩條路線 ==========
-        tool_calls = []
-        result_full_text = "🤖 "
-        think = False
-        thing_time = None
-        thing_full_text = "💭 "
+                tool_calls = []
+                for t in chunk.message.tool_calls:
+                    tool_calls.append(ToolCall(tool_name=t.function.name, args=dict(t.function.arguments))) # 回傳函數以及對應的參數
 
-        console = Console() # 初始化 rich 終端
-        with Live(console=console, refresh_per_second=10, vertical_overflow="visible") as live:
-            for chunk in response:
-                # ----- 1. 流式輸出文字 -----
-                if not chunk.message.tool_calls:
-                    chunk_text = chunk.message.content
-                    thing_chunk_text = getattr(chunk.message, "thinking", None) # 有 chunk.message.thinking 否則為 None
+                yield StreamChunk(tool_calls=tool_calls)
 
-                    if thing_chunk_text: # 推理過程
-                        if thing_time is None:
-                            thing_time = time.perf_counter() # 計時
-                        think = True
-                        thing_full_text += thing_chunk_text
+            else: # 推理或回答時
 
-                        live.update(Markdown(thing_full_text))
+                thinking = getattr(chunk.message, "thinking", None) # 用 getattr 防止模型沒有推理功能（沒有 message.thinking 屬性）
+                # 有推理能力模型在非推理時 message.thinking 回傳 None
 
-                    if chunk.message.content: # 正式回答
-                        if think:
-                            thing_time = round(time.perf_counter() - thing_time, 1) # 更新計時，只保留小數點第一位
-                            console.print(f"💭 [bold blue]已思考 {thing_time} 秒...[/bold blue]")
-                            think = False
+                content = chunk.message.content
 
-                        result_full_text += chunk_text
-
-                        live.update(Markdown(result_full_text))  
-
-                # ----- 2. tool use -----
-                else:
-                    if think and thing_time is not None:
-                        thing_time = round(time.perf_counter() - thing_time, 1)
-                        console.print(f"💭 [bold blue]已思考 {thing_time} 秒...[/bold blue]")
-                        think = False # 防止重複計時
-                        live.update(Markdown(""))
-
-                    for f in chunk.message.tool_calls:
-                        tool_calls.append(ToolCall(f.function.name, dict(f.function.arguments)))
-
-        # 按照 LLMResponse 的要求輸出
-        if tool_calls:
-            return LLMResponse(tool_calls=tool_calls)
-        else:
-            return LLMResponse(content=result_full_text)
+                yield StreamChunk(thinking_chunk=thinking, content_chunk=content)   

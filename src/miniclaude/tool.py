@@ -63,7 +63,10 @@ def list_file(
     pattern: str, # Glob 規則
     base_path: str = "." # 搜尋起點
 ) -> str:
-    """ 列出檔案 """
+    """
+    列出檔案
+    如果要尋找專案外或使用者家目錄的檔案（例如 Downloads, Desktop），請務必修改 base_path 參數（如 '~/Downloads' 或 '/Users/...'）
+    """
     files = []
     try:
         for file in Path(base_path).expanduser().glob(pattern):
