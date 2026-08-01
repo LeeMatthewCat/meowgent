@@ -8,7 +8,7 @@ import questionary
 from providers.gemini_provider import GeminiProvider
 from providers.ollama_provider import OllamaProvider
 from tool import execute_tool, TOOL_REGISTRY
-from providers.base import LLMProvider, ToolCall
+from providers.base import ToolCall
 import time
 from rich.live import Live
 from typing import List
@@ -131,7 +131,7 @@ if __name__ == "__main__":
                     ) # 呼叫工具的訊息加入多輪
 
                     for t in tools:
-                        # t 為 ToolCall 型別物件
+                        # t 為 ToolCall 型別物件 
 
                         f = TOOL_REGISTRY.get(t.tool_name, None)
 

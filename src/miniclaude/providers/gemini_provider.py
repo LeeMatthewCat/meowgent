@@ -1,16 +1,13 @@
 from abc import abstractmethod
 
-from .base import ToolCall, LLMResponse, LLMProvider, StreamChunk
+from .base import ToolCall, LLMProvider, StreamChunk
 from typing import Optional, Iterator, List, Callable
 from google import genai
 from google.genai import types
 from tool import TOOL_REGISTRY
 
 class GeminiProvider(LLMProvider):
-    def __init__(
-        self,
-        model_name: str,
-    ):
+    def __init__(self, model_name: str):
         super().__init__(model_name=model_name)
 
         self.client = genai.Client() # 初始化模型

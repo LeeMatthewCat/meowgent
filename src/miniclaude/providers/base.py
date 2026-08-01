@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, Dict, List, Any, Iterator
+from typing import Optional, Dict, List, Any, Iterator, Literal
 
 @dataclass
 class ToolCall:
@@ -11,12 +11,13 @@ class ToolCall:
     id: Optional[str] = None # 工具調用編號
     thought_signature: Optional[Any] = None # 推理簽名（用於調用完工具後找回先前的推理邏輯）
 
-
 @dataclass
 class LLMResponse:
+    status: Literal["response", "thinking", "thinking_done", "tool_executed", "tool_rejected"]
     content: Optional[str] = None
-    tool_calls: Optional[List[ToolCall]] = None
-
+    think_time: Optional[float] = None
+    tool_name: Optional[str] = None
+    
 @dataclass
 class StreamChunk:
     """ 統一串流（流式輸出）協定 """
@@ -38,17 +39,4 @@ class LLMProvider(ABC):
         tools: Optional[list] = None
     ) -> Iterator[StreamChunk]:
         pass
-
-    def generate(
-        self,
-        history_messages: list,
-        tools: Optional[list] = None
-    ) -> LLMResponse:
-
-        content = ""
-        tool_list = []
-
-        for chunk in self.stream_generate():
-            ...
-        
         
