@@ -44,7 +44,7 @@ def edit_file(file_path: str, old_content: str, new_content: str):
 
     # ----- 檢查：1. 有舊內容 2. 舊內容不重複 -----
     if old_content not in all_content:
-        return f"Error: cant't find {old_content} in {file_path}"
+        return f"Error: can't find {old_content} in {file_path}" 
     else:
         if all_content.count(old_content) > 1:
             return f"Error: old_string found {all_content.count(old_content)} times in {file_path}. Must be unique to safely replace."
@@ -144,4 +144,4 @@ def execute_tool(tool_name: str, tool_args: dict) -> str:
     try:
         return func(**tool_args) # ** 拆包
     except Exception as e:
-        return f"Error: executing tool {tool_name} with error"
+        return f"Error: executing tool {tool_name} with error, {e}"
