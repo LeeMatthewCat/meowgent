@@ -31,3 +31,6 @@ src/miniclaude/
 
 # 檢查：
 1. gemini：推理尚未測試，在 agent.py 和 agent_.py
+2. ollama 使用 system prompt 層面注入工具調用規範，不使用自帶工具調用接口，提升效能
+
+

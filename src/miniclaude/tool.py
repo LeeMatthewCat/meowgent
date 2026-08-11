@@ -1,6 +1,9 @@
 from pathlib import Path 
 import re
 import subprocess
+import httpx
+import html2text
+from readability import Document
 
 TOOL_REGISTRY = {} # 註冊表
 def tool_register(need_approval: bool = True): # 屬性裝飾器
@@ -145,3 +148,70 @@ def execute_tool(tool_name: str, tool_args: dict) -> str:
         return func(**tool_args) # ** 拆包
     except Exception as e:
         return f"Error: executing tool {tool_name} with error, {e}"
+
+@tool_register(True)
+def web_fetch(url: str, offset: int = 0, limit: int = 3000) -> str:
+    """ 獲取網頁內容並轉成文字"""
+
+    # ========== 1. 驗證爲網址與 HTTP 請求  ==========
+    if not url.startswith(("http://", "https://")): # 非網址
+        return f"Error: this is not a url"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    } # 偽裝為用戶，繞過反爬蟲
+
+    try:
+        response = httpx.get(
+            url = url,
+            headers=headers,
+            follow_redirects=True,
+            timeout=10
+        )
+        response.raise_for_status() # 拋出連線異常 httpx.HTTPStatusError
+
+        text = response.content.decode(response.encoding or "utf-8", errors="ignore")
+
+    except httpx.HTTPStatusError as e: # 攔截伺服器錯誤
+        return f"Error: HTTP status {e.response.status_code}({e.response.reason_phrase})"
+
+    except httpx.RequestError as e: # 攔截網路連線錯誤
+        return f"Error: Connection/Network failed: {e}"
+
+    # ========== 2. HTML -> Markdown ==========
+    # ----- a. 提純 -----
+    doc = Document(text)
+
+    html_summary = doc.summary()
+
+    if html_summary and len(html_summary) > 100: # 存在且沒有過度刪減
+        text = html_summary
+    # ----- b. 轉換 -----
+    h = html2text.HTML2Text()
+    h.ignore_images = True # 忽略圖片
+    h.body_width = 0 # 不做自動換行
+    h.single_line_break = True # 換行不隔行
+
+    text = h.handle(text)
+
+    # ========== 3. 定位切片點 ==========
+    total_len = (len(text))
+
+    if offset > total_len: # 起始點大於總文長
+        return f"Error: designated offest ({offset}) is longer than the web content ({total_len})"
+
+    raw_end = offset + limit
+
+    if raw_end >= total_len:
+        end = total_len
+    else:
+        search_start = max(offset, raw_end - 500) # 往回推 500 為搜尋邊界
+
+        target_idx = text.rfind("\n\n", search_start, raw_end) # 找最後出現的，故從右開始找
+
+        end = target_idx if target_idx != -1 else raw_end
+
+    # ========== 4. 切片及回傳 ==========
+    suffix = f"[The content has been truncated. To read the next page, call web_fetch with offset={end}]" if total_len > end else ""
+
+    return f"[show the words {offset}~{end}, total words is{total_len}]" + text[offset:end] + suffix

@@ -40,7 +40,8 @@ class OllamaProvider(LLMProvider):
             model=self.model_name,
             messages=ollama_history_messsages,
             stream=True, # 流式輸出文字
-            tools=tools_list
+            tools=tools_list,
+            options={"num_ctx": 16384}
         )
         # ========== D. 模型回傳處理 ==========
         # 一次回傳一個 token 的內容，通過 agent.py 不斷呼叫達成流式輸出

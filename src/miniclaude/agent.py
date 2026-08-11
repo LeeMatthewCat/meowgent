@@ -77,6 +77,7 @@ class Agent():
                         yield thinking_status
 
                     tools.extend(chunk.tool_calls) # 把函數名和參數扁平的傳入（讓傳入的串列扁平化，不要 tools 的串列包 chunk.tool_call 的串列）
+                    break # 拿到工具調用後立即退出（不用跑完下方 if tools）
 
             if tools: # 表示有 tool use 需求
             
@@ -136,5 +137,3 @@ class Agent():
                 ) # 對話加入多輪
 
                 break # 模型沒有調用工具 -> 表示已經生成最終回答，故退出 while True: 迴圈
-
-            
