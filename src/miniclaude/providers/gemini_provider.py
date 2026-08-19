@@ -19,14 +19,16 @@ class GeminiProvider(LLMProvider):
         for msg in history_messages:
             
                 if msg["role"] == "user": # 使用者輸入
-                    gemini_history_messages.append(
-                        types.Content(
-                            role="user",
-                            parts=[
-                                types.Part.from_text(text=msg["content"])
-                            ]
+
+                    new_part = types.Part.from_text(text=msg["content"])
+                    
+                    # 防止使用者輸入的前一項也是使用者，像是有在使用者輸入前輸入 systeam prompt
+                    if gemini_history_messages and gemini_history_messages[-1].role == "user":
+                        gemini_history_messages[-1].parts.append(new_part)
+                    else:
+                        gemini_history_messages.append(
+                            types.Content(role="user", parts=[new_part])
                         )
-                    )
 
                 elif "tool_calls" in msg: # 模型調用工具
                     parts = []
@@ -78,8 +80,12 @@ class GeminiProvider(LLMProvider):
                     )
 
         # ========== B. 工具函數註冊表轉串列 ==========
-        tools_list = tools if tools is not None else list(TOOL_REGISTRY.values())
-        # 可傳入指定函數物件（在串列裡）則只使用它
+        if tools is None: # 不傳入 -> 使用所有工具
+            tools_list = list(TOOL_REGISTRY.values())
+        elif len(tools) == 0: # 空串列 -> 限制不能用工具
+            tools_list = None
+        else: # 自訂可用工具
+            tools_list = tools
         
         # ========== C. 遞交給模型 ==========
         response = self.client.models.generate_content_stream(
@@ -93,31 +99,27 @@ class GeminiProvider(LLMProvider):
 
         # ========== D. 解析調用函數 ==========
         for chunk in response:
-            
+
             if not chunk.parts: # 防止模型出現拒絕回答（資安問題）、生成錯誤等情況
                 continue
+        
+            tool_calls = []
+            for part in chunk.parts:
 
-            if chunk.function_calls:
-                tool_calls = []
-                for part in chunk.parts:
+                if getattr(part, "thought", False) and part.text: # 推理
+                    yield StreamChunk(thinking_chunk=part.text)
 
-                    if part.function_call:
-
-                        tool_calls.append(
-                            ToolCall(
-                                tool_name=part.function_call.name,
-                                args=part.function_call.args,
-                                id=getattr(part.function_call, "id", None),
-                                thought_signature=getattr(part, "thought_signature", None)
-                            )
+                elif part.function_call: # 工具調用
+                    tool_calls.append(
+                        ToolCall(
+                            tool_name=part.function_call.name,
+                            args=part.function_call.args,
+                            id=getattr(part.function_call, "id", None),
+                            thought_signature=getattr(part, "thought_signature", None)
                         )
+                    )
+                elif part.text: # 回答
+                    yield StreamChunk(content_chunk=part.text) 
 
-                yield StreamChunk(tool_calls=tool_calls)
-                
-            else: # 推理或回答時
-                for part in chunk.parts:
-                    if getattr(part, "thought", False):
-                        yield StreamChunk(thinking_chunk=part.text)
-                    else:
-                        yield StreamChunk(content_chunk=part.text)
-                    # 若為推理情況返回推理文字，反之正式回答文字（兩者共用 part.text 屬性）
+            if tool_calls:
+                yield StreamChunk(tool_calls=tool_calls) # 收集完所有工具再回傳

@@ -39,27 +39,37 @@ def write_file(file_path: str, content: str) -> str:
 @tool_register(True)
 def edit_file(file_path: str, old_content: str, new_content: str):
     """ 局部修改文字 """
-    # ----- 讀 -----
     try:
-        all_content = Path(file_path).expanduser().read_text(encoding="utf-8")
+        # 擋掉空字串
+        if not old_content:
+            return "Error: old_content cannot be empty."
+
+        p = Path(file_path).expanduser()
+
+        if not p.is_file(): # 如果沒有此檔案
+            return f"Error: file not found at {file_path}"
+        
+        all_content = p.read_text(encoding="utf-8") # 讀檔案
+
+        # 檢查內容是否存在
+        if old_content not in all_content:
+            return f"Error: can't find '{old_content}' in {file_path}"
+        
+        # 檢查內容是否唯一
+        occurrences = all_content.count(old_content)
+
+        if occurrences > 1:
+            return f"Error: old_content found {occurrences} times in {file_path}. Must be unique to safely replace."
+
+        # 寫入
+        all_content = all_content.replace(old_content, new_content, 1)
+
+        p.write_text(all_content, encoding="utf-8")
+
+        return f"Successfully edited {file_path}"
+    
     except Exception as e:
-        return f"Error: can't reading file {file_path}: {e}"
-
-    # ----- 檢查：1. 有舊內容 2. 舊內容不重複 -----
-    if old_content not in all_content:
-        return f"Error: can't find {old_content} in {file_path}" 
-    else:
-        if all_content.count(old_content) > 1:
-            return f"Error: old_string found {all_content.count(old_content)} times in {file_path}. Must be unique to safely replace."
-        else:
-            # ----- 替換並寫入 -----
-            all_content = all_content.replace(old_content, new_content)
-
-            try:
-                Path(file_path).expanduser().write_text(all_content, encoding="utf-8")
-                return f"Successfully edited {file_path}"
-            except Exception as e:
-                return f"Error: can't writing(editing) file {file_path}: {e}"
+        return f"Error editing file {file_path}: {e}"
 
 @tool_register(False)
 def list_file(
@@ -92,6 +102,11 @@ def grep_search(
     """ 搜尋文字檔內容 """
     try:
         rx = re.compile(pattern) # 預先編譯，不用每次迴圈都編譯一次
+
+    except re.error as e: # 捕捉正則編譯錯誤
+        return f"Error: Invalid regular expression '{pattern}': {e}"
+
+    try:
 
         match_contents = []
         for file in Path(base_path).expanduser().rglob("*"):
@@ -127,15 +142,19 @@ def run_shell(command: str) -> str:
             shell=True, # 直接執行
             capture_output=True, # 回傳輸出或錯誤
             text=True, # 轉字串
-            timeout=30 # 超過 30 秒則退出
+            timeout=30, # 超過 30 秒則退出
+            errors="replace" # 防止解碼報錯
         )
 
         if execution.returncode == 0: # 成功執行
             return execution.stdout if execution.stdout != "" else "(no output)"
         else:
             return f"Command failed (exit code {execution.returncode}):\nStdout: {execution.stdout}\nStderr: {execution.stderr}"
+
+    except subprocess.TimeoutExpired: # 攔截超時
+        return f"Error: The command '{command}' timed out (exceeded 30 seconds)."
     except Exception as e:
-        return f"Error: the command ({command} is execution too long time)"
+        return f"Error executing command: {e}"
 
 def execute_tool(tool_name: str, tool_args: dict) -> str:
     """ 調用工具 """

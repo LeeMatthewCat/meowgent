@@ -2,6 +2,7 @@ from .base import ToolCall, LLMProvider, StreamChunk
 from typing import Optional, Iterator, List, Callable
 import ollama
 from tool import TOOL_REGISTRY
+import json
 
 class OllamaProvider(LLMProvider):
     def __init__(self, model_name: str):
@@ -50,7 +51,18 @@ class OllamaProvider(LLMProvider):
 
                 tool_calls = []
                 for t in chunk.message.tool_calls:
-                    tool_calls.append(ToolCall(tool_name=t.function.name, args=dict(t.function.arguments))) # 回傳函數以及對應的參數
+
+                    raw_args = t.function.arguments
+
+                    if isinstance(raw_args, str): # 防止模型傳入的參數為 JSON 格式（用字串傳入）
+                        try:
+                            parsed_args = json.loads(raw_args) # "{}" -> {}
+                        except:
+                            parsed_args = {"raw_input": raw_args}
+                    else:
+                        parsed_args = dict(raw_args) if raw_args else {}
+
+                    tool_calls.append(ToolCall(tool_name=t.function.name, args=parsed_args)) # 回傳函數以及對應的參數
 
                 yield StreamChunk(tool_calls=tool_calls)
 
