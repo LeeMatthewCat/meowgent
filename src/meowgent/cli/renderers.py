@@ -65,7 +65,7 @@ class CLIRenderer:
         version = 1.0
         user_name = "matthew"
 
-        self.console.print(f"[blue] MeowCode CLI {version}[/blue]\n[dim] {user_name}[/dim]\n")
+        self.console.print(f"[blue] Meowgent CLI {version}[/blue]\n[dim] {user_name}[/dim]\n")
         self.console.print(self.get_rule())
 
     def get_live(self, refresh_per_second: float = 10):

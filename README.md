@@ -1,6 +1,6 @@
 # 架構
 ```
-src/miniclaude/
+src/meowgent/
  ├── providers
  |    ├── __init__.py
  |    ├── base.py                  # 規範
@@ -18,7 +18,7 @@ src/miniclaude/
 # 畫面預想：
 ```
 
-  MeowCode CLI 1.0 -> 主色調
+  Meowgent CLI 1.0 -> 主色調
   matthew -> 灰
 
 ———————————————————————————————————————————

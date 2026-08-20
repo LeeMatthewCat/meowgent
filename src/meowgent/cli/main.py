@@ -1,7 +1,5 @@
 from agent import Agent
-from providers.base import LLMResponse
-from providers.gemini_provider import GeminiProvider
-from providers.ollama_provider import OllamaProvider
+from providers import LLMResponse, GeminiProvider, OllamaProvider
 from dotenv import load_dotenv
 from cli.input_prompt import get_input, get_tool_aproval
 from cli.renderers import CLIRenderer

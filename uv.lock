@@ -1062,7 +1062,7 @@ wheels = [
 ]
 
 [[package]]
-name = "miniclaude"
+name = "meowgent"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
