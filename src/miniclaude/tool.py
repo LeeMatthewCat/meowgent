@@ -13,6 +13,18 @@ def tool_register(need_approval: bool = True): # 屬性裝飾器
         return func
     return decorator
 
+def execute_tool(tool_name: str, tool_args: dict) -> str:
+    """ 調用工具 """
+    func = TOOL_REGISTRY.get(tool_name) # 找不到回傳 None
+
+    if not func: # 找不到函數
+        return f"錯誤：找不到名為 '{tool_name}' 的工具"
+
+    try:
+        return func(**tool_args) # ** 拆包
+    except Exception as e:
+        return f"錯誤：執行工具 '{tool_name}' 時發生異常：{e}"
+
 # ========== 工具 ==========
 @tool_register(False)
 def read_file(file_path: str) -> str:
@@ -20,7 +32,7 @@ def read_file(file_path: str) -> str:
     try:
         return Path(file_path).expanduser().read_text(encoding="utf-8")
     except Exception as e:
-        return f"Error: can't reading file {file_path}: {e}"
+        return f"錯誤：讀取檔案 '{file_path}' 失敗：{e}"
 
 @tool_register(True)
 def write_file(file_path: str, content: str) -> str:
@@ -30,11 +42,11 @@ def write_file(file_path: str, content: str) -> str:
 
         Path(file_path).expanduser().write_text(content, encoding="utf-8")
 
-        return f"Successfully wrote to {file_path} ({len(content.splitlines())}) lines"
+        return f"成功寫入檔案 '{file_path}'（共 {len(content.splitlines())} 行）"
         # content.splitlines() 字串分行拆成串列
     
     except Exception as e:
-        return f"Error: can't writing file {file_path}: {e}"
+        return f"錯誤：寫入檔案 '{file_path}' 失敗：{e}"
 
 @tool_register(True)
 def edit_file(file_path: str, old_content: str, new_content: str):
@@ -42,34 +54,34 @@ def edit_file(file_path: str, old_content: str, new_content: str):
     try:
         # 擋掉空字串
         if not old_content:
-            return "Error: old_content cannot be empty."
+            return "錯誤：old_content 不能為空字串。"
 
         p = Path(file_path).expanduser()
 
         if not p.is_file(): # 如果沒有此檔案
-            return f"Error: file not found at {file_path}"
+            return f"錯誤：找不到檔案 '{file_path}'"
         
         all_content = p.read_text(encoding="utf-8") # 讀檔案
 
         # 檢查內容是否存在
         if old_content not in all_content:
-            return f"Error: can't find '{old_content}' in {file_path}"
+            return f"錯誤：在 '{file_path}' 中找不到指定的 '{old_content}'"
         
         # 檢查內容是否唯一
         occurrences = all_content.count(old_content)
 
         if occurrences > 1:
-            return f"Error: old_content found {occurrences} times in {file_path}. Must be unique to safely replace."
+            return f"錯誤：在 '{file_path}' 中找到 {occurrences} 處相符的內容。old_content 必須具備唯一性才能安全取代。"
 
         # 寫入
         all_content = all_content.replace(old_content, new_content, 1)
 
         p.write_text(all_content, encoding="utf-8")
 
-        return f"Successfully edited {file_path}"
+        return f"成功修改檔案 '{file_path}'"
     
     except Exception as e:
-        return f"Error editing file {file_path}: {e}"
+        return f"錯誤：修改檔案 '{file_path}' 時發生錯誤：{e}"
 
 @tool_register(False)
 def list_file(
@@ -86,12 +98,12 @@ def list_file(
             if file.is_file():
                 files.append(str(file))
     except Exception as e:
-        return f"Error: can't find the path {base_path}"
+        return f"錯誤：找不到路徑 '{base_path}'"
 
     return_files = "\n".join(files[:200]) # 只保留 200 個
 
     if len(files) > 200:
-        return_files += f"\n\n... (Showing top 200 of {len(files)} files. Please use a more specific pattern to narrow down)."
+        return_files += f"\n\n...（僅顯示前 200 筆，共 {len(files)} 個檔案。請使用更精確的 pattern 來縮小搜尋範圍）。"
     return return_files
 
 @tool_register(False)              
@@ -104,7 +116,7 @@ def grep_search(
         rx = re.compile(pattern) # 預先編譯，不用每次迴圈都編譯一次
 
     except re.error as e: # 捕捉正則編譯錯誤
-        return f"Error: Invalid regular expression '{pattern}': {e}"
+        return f"錯誤：無效的正則表達式 '{pattern}'：{e}"
 
     try:
 
@@ -126,11 +138,11 @@ def grep_search(
         return_matches = "\n".join(match_contents[:100]) # 只保留 100 個
 
         if len(match_contents) > 100:
-            return_matches += "\n\n... (Showing top 100 matches. Please use a more specific search pattern to narrow down)."
+            return_matches += "\n\n...（僅顯示前 100 筆比對結果。請使用更精確的搜尋 pattern 來縮小範圍）。"
 
         return return_matches
     except Exception as e:
-        return f"Error: can't find the path {base_path}"
+        return f"錯誤：找不到路徑 '{base_path}'"
 
 @tool_register(True) 
 def run_shell(command: str) -> str:
@@ -147,26 +159,14 @@ def run_shell(command: str) -> str:
         )
 
         if execution.returncode == 0: # 成功執行
-            return execution.stdout if execution.stdout != "" else "(no output)"
+            return execution.stdout if execution.stdout != "" else "（指令執行完成，無輸出內容）"
         else:
-            return f"Command failed (exit code {execution.returncode}):\nStdout: {execution.stdout}\nStderr: {execution.stderr}"
+            return f"指令執行失敗（結束代碼 {execution.returncode}）：\n標準輸出 (Stdout)：{execution.stdout}\n標準錯誤 (Stderr)：{execution.stderr}"
 
     except subprocess.TimeoutExpired: # 攔截超時
-        return f"Error: The command '{command}' timed out (exceeded 30 seconds)."
+        return f"錯誤：指令 '{command}' 執行超時（超過 30 秒）。"
     except Exception as e:
-        return f"Error executing command: {e}"
-
-def execute_tool(tool_name: str, tool_args: dict) -> str:
-    """ 調用工具 """
-    func = TOOL_REGISTRY.get(tool_name) # 找不到回傳 None
-
-    if not func: # 找不到函數
-        return f"Error: can't find {tool_name}"
-
-    try:
-        return func(**tool_args) # ** 拆包
-    except Exception as e:
-        return f"Error: executing tool {tool_name} with error, {e}"
+        return f"錯誤：執行指令時發生錯誤：{e}"
 
 @tool_register(True)
 def web_fetch(url: str, offset: int = 0, limit: int = 3000) -> str:
@@ -174,7 +174,7 @@ def web_fetch(url: str, offset: int = 0, limit: int = 3000) -> str:
 
     # ========== 1. 驗證爲網址與 HTTP 請求  ==========
     if not url.startswith(("http://", "https://")): # 非網址
-        return f"Error: this is not a url"
+        return "錯誤：這不是一個有效的網址（URL）"
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -192,10 +192,10 @@ def web_fetch(url: str, offset: int = 0, limit: int = 3000) -> str:
         text = response.content.decode(response.encoding or "utf-8", errors="ignore")
 
     except httpx.HTTPStatusError as e: # 攔截伺服器錯誤
-        return f"Error: HTTP status {e.response.status_code}({e.response.reason_phrase})"
+        return f"錯誤：HTTP 狀態碼 {e.response.status_code} ({e.response.reason_phrase})"
 
     except httpx.RequestError as e: # 攔截網路連線錯誤
-        return f"Error: Connection/Network failed: {e}"
+        return f"錯誤：網路連線失敗：{e}"
 
     # ========== 2. HTML -> Markdown ==========
     # ----- a. 提純 -----
@@ -217,7 +217,7 @@ def web_fetch(url: str, offset: int = 0, limit: int = 3000) -> str:
     total_len = (len(text))
 
     if offset > total_len: # 起始點大於總文長
-        return f"Error: designated offest ({offset}) is longer than the web content ({total_len})"
+        return f"錯誤：指定的 offset ({offset}) 超出網頁內容總長度 ({total_len})"
 
     raw_end = offset + limit
 
@@ -231,6 +231,6 @@ def web_fetch(url: str, offset: int = 0, limit: int = 3000) -> str:
         end = target_idx if target_idx != -1 else raw_end
 
     # ========== 4. 切片及回傳 ==========
-    suffix = f"[The content has been truncated. To read the next page, call web_fetch with offset={end}]" if total_len > end else ""
+    suffix = f"\n\n[內容已截斷。若要閱讀下一頁，請呼叫 web_fetch 並帶入 offset={end}]" if total_len > end else ""
 
-    return f"[show the words {offset}~{end}, total words is{total_len}]" + text[offset:end] + suffix
+    return f"[顯示字元區間 {offset}~{end}，總字數為 {total_len}]\n" + text[offset:end] + suffix

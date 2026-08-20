@@ -33,7 +33,7 @@ def get_tool_aproval(tool_name: str, tool_args: dict) -> bool:
 
     return questionary.confirm(
         msg,
-        default=False,
+        default=True,
         style=Style([
             ('question', 'dim'),         
             ('instruction', 'dim')

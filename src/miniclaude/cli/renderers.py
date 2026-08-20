@@ -46,7 +46,7 @@ class ResponseStreamer:
 
             live.update("")
             self.console.print(Padding(Markdown(self.cache), (0, 0, 0, 2)))
-            self.console.print(Rule(style="dim"))
+            self.console.print(Rule(style="dim", end=""))
 
         self.cache = ""
         self.last_len = 0
@@ -101,6 +101,9 @@ class CLIRenderer:
 
     def render_thinking_summary(self, think_time: float) -> Text: # 推理總結渲染
         return Padding(Text.from_markup(f"[dim]已思考{think_time}秒[/dim]"), (0 ,0, 0, 2))
+
+    def render_prepare_tool(self) -> Markdown:
+        return Markdown("⚙ 正在準備工具參數", style="dim")
 
     def render_model_response(self, content: str) -> Group: # 回答渲染
         return Group(

@@ -22,7 +22,7 @@ if __name__ == "__main__":
 
     cli.initialization() # 初始介面
 
-    def ask_tool_approval(tool_name: str, tool_args: dict):
+    def ask_tool_approval(tool_name: str, tool_args: dict) -> bool:
         live.update("") # 清除分隔線，否則調用許可會出現在分隔線下方
         live.stop() # 停止 live 更新
 
@@ -59,6 +59,10 @@ if __name__ == "__main__":
                         
                     elif stream_content.status == "response": # 輸出模型回答內容
                         response_streamer.update_content(full_text=stream_content.content, live=live)
+
+                    elif stream_content.status == "prepare_tool":
+                        live.update("")
+                        cli.console.print(cli.render_prepare_tool())
 
                     elif stream_content.status == "tool_executed": # 輸出工具調用成功
 

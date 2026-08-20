@@ -6,14 +6,17 @@ from providers.ollama_provider import OllamaProvider
 from tool import execute_tool, TOOL_REGISTRY
 from providers.base import ToolCall
 from providers.base import LLMProvider, LLMResponse
-from typing import List, Callable, Optional, Iterator
+from typing import List, Callable, Optional, Iterator, Tuple
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 class Agent():
     def __init__(self, provider: LLMProvider, max_turns: int = 20):
         self.provider = provider # 直接傳入 provider = OllamaProvider(model_name)
         self.max_turns = max_turns
         self.history_messages = []
+
+        self.executor = ThreadPoolExecutor(max_workers=4) # 任務池（同步處理工具調用）
         
     def chat(self, user_input: str, tool_approval: Callable[[str, dict], bool]) -> Iterator[LLMResponse]:
         
@@ -39,7 +42,7 @@ class Agent():
                 temp_history_messages.append(
                     {
                         "role": "user",
-                        "content": "[System Prompt] You have reached the maximum tool call limit. Please do not call any more tools, output your final answer directly, and summarize the current progress and encountered issues."
+                        "content": "[系統提示] 您已達到工具調用次數上限。請勿再調用工具，直接輸出最終回答，並總結當前進度與遇到的問題。"
                     }
                 )
                 available_tools = [] # 不給工具
@@ -58,7 +61,7 @@ class Agent():
             is_thinking = False
             think_start_time = None
 
-            tools: List[ToolCall] = [] # 模型要使用的工具
+            tools_result: List[Tuple] = [] # 存放 [{ToolCall 物件, 執行結果}, ...]
 
             def thinking_finish() -> Optional[LLMResponse]:
                 """ 判斷推理階段是否結束，若結束則清除版面並顯示推理時間 """
@@ -100,11 +103,23 @@ class Agent():
                     if thinking_status:
                         yield thinking_status
 
-                    tools.extend(chunk.tool_calls) # 把函數名和參數扁平的傳入（讓傳入的串列扁平化，不要 tools 的串列包 chunk.tool_call 的串列）
+                    yield LLMResponse(status="prepare_tool")
 
-            # ========== C. 工具調用處理 ==========
-            if tools: # 表示有 tool use 需求
-            
+                    for t in chunk.tool_calls:
+                        # t 為 ToolCall 型別物件 
+
+                        need_approval = getattr(TOOL_REGISTRY.get(t.tool_name, None), "need_approval", True)
+
+                        if not need_approval or tool_approval(t.tool_name, t.args): # 不需審核或審核通過 -> 工具可調用
+
+                            tools_result.append((t, self.executor.submit(execute_tool, t.tool_name, t.args)))
+
+                        else: # 不可調用
+
+                            tools_result.append((t, "[系統提示] 使用者基於安全考量拒絕了此工具的執行"))
+
+            # ========== C. 多輪對話紀錄 ==========
+            if tools_result: # 表示有 tool use 需求
                 
                 msg = {
                     "role": "assistant",
@@ -114,7 +129,7 @@ class Agent():
                             "args": t.args,
                             "id": getattr(t, "id", None),
                             "thought_signature": getattr(t, "thought_signature", None)
-                        } for t in tools
+                        } for t, _ in tools_result
                     ]
                 }
                 # 呼叫工具的訊息加入多輪
@@ -123,35 +138,30 @@ class Agent():
 
                 self.history_messages.append(msg)
 
-                for t in tools:
-                    # t 為 ToolCall 型別物件 
-                    
-                    need_approval = getattr(TOOL_REGISTRY.get(t.tool_name, None), "need_approval", True)
+                for t, tool_v in tools_result:
 
-                    if not need_approval or tool_approval(t.tool_name, t.args): # 工具不需要許可或請求許可被同意
-                        # tool_approval 是函數
-                        self.history_messages.append(
-                            {
-                                "role": "tool",
-                                "tool_name": t.tool_name,
-                                "id": getattr(t, "id", None),
-                                "content": execute_tool(tool_name=t.tool_name, tool_args=t.args)
-                            }
-                        ) # 成功調用工具的訊息加入多輪
+                    if hasattr(tool_v, "result"): # 檢查是否有 .result() 可用
 
-                        yield LLMResponse(status="tool_executed", tool_name=t.tool_name)
+                        result = tool_v.result()
+
+                        is_sucess = True
                     else:
-                        self.history_messages.append(
-                            {
-                                "role": "tool",
-                                "tool_name": t.tool_name,
-                                "id": getattr(t, "id", None),
-                                "content": f"User rejected execution of this tool for security reasons"
-                            }
-                        ) # 工具調用失敗的訊息加入多輪
+                        result = tool_v
 
-                        yield LLMResponse(status="tool_rejected", tool_name=t.tool_name)
+                        is_sucess = False
 
+                    self.history_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_name": t.tool_name,
+                            "id": getattr(t, "id", None),
+                            "content": result
+                        }
+                    )
+
+                    status = "tool_executed" if is_sucess else "tool_rejected"
+                    yield LLMResponse(status=status, tool_name=t.tool_name)
+      
             else: # 沒有 tool use 需求
                  
                 if not result_full_text.strip():
