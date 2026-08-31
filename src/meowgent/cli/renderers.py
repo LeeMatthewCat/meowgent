@@ -39,6 +39,12 @@ class ResponseStreamer:
             
             live.update(self.render_func(self.cache))
 
+    def reset(self, live: Live):
+        """ 清空暫存並重置計數（工具調用時使用） """
+        live.update("")
+        self.cache = ""
+        self.last_len = 0
+        
     def clean(self, live:Live):
         """ 清除最後留在 live 的內容（轉為 console.print()）"""
 
@@ -52,9 +58,7 @@ class ResponseStreamer:
         self.last_len = 0
 
 class CLIRenderer:
-    def __init__(self, model_provider: str, model: str):
-        self.model_provider = model_provider
-        self.model = model
+    def __init__(self):
 
         self.console = Console()
 
@@ -74,7 +78,7 @@ class CLIRenderer:
         """
         return Live(console=self.console, refresh_per_second=refresh_per_second, vertical_overflow="crop")
 
-    def render_thinking_streamer(self, content: str):
+    def render_single_line_streamer(self, content: str):
 
         content = content.replace("\n", " ") # 換行替換為空格
 
@@ -102,8 +106,14 @@ class CLIRenderer:
     def render_thinking_summary(self, think_time: float) -> Text: # 推理總結渲染
         return Padding(Text.from_markup(f"[dim]已思考{think_time}秒[/dim]"), (0 ,0, 0, 2))
 
-    def render_prepare_tool(self) -> Markdown:
-        return Markdown("⚙ 正在準備工具參數", style="dim")
+    def render_tool_approval_result(self, tool_name: str, approval: bool) -> Text: # 工具調用結果渲染
+
+        text_chunk = "[green]已被調用[/green]" if approval else "[red]未被調用[/red]"
+        return Padding(Text.from_markup(f"[dim]{tool_name}[/dim] {text_chunk}"), (0 ,0, 0, 2))   
+
+    def render_tool_calling_streamer(self, content: str) -> Group:
+        """ 工具參數生成中的單行跑馬燈（復用思考跑馬燈的單行裁切排版邏輯） """
+        return self.render_single_line_streamer(f"{content}")
 
     def render_model_response(self, content: str) -> Group: # 回答渲染
         return Group(
@@ -113,8 +123,3 @@ class CLIRenderer:
 
     def get_response_streamer(self) -> ResponseStreamer:
         return ResponseStreamer(console=self.console, render_func=self.render_model_response)
-    
-    def render_tool_approval_result(self, tool_name: str, approval: bool) -> Text: # 工具調用結果渲染
-
-        text_chunk = "[green]已被調用[/green]" if approval else "[red]未被調用[/red]"
-        return Padding(Text.from_markup(f"[dim]{tool_name}[/dim] {text_chunk}"), (0 ,0, 0, 2))   

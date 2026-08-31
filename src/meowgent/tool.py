@@ -1,33 +1,43 @@
 from pathlib import Path 
 import re
 import subprocess
+from typing import Annotated, Callable, Dict, Any
 import httpx
-import html2text
 from readability import Document
+import html2text
+from mcp.server.mcpserver import MCPServer
+import logging
 
-TOOL_REGISTRY = {} # 註冊表
-def tool_register(need_approval: bool = True): # 屬性裝飾器
-    def decorator(func):
-        func.need_approval = need_approval # 是否需要許可才能被模型使用
-        TOOL_REGISTRY[func.__name__] = func
+mcp = MCPServer("Meowgent")
+logging.getLogger().handlers.clear() # 刪去 mcp 做的日誌綁定
+
+TOOL_REGISTRY: Dict[str, Callable] = {}
+def tool_register(need_approval: bool = True):
+    """屬性裝飾器：同時註冊到 MCP 伺服器與內部字典"""
+    def decorator(func: Callable):
+        func.need_approval = need_approval # 標記是否需要審批
+        
+        TOOL_REGISTRY[func.__name__] = func # 註冊給 agent.py 內部使用
+        mcp.add_tool(func) # 註冊給 MCP 協議外部調用
+        
         return func
     return decorator
 
-def execute_tool(tool_name: str, tool_args: dict) -> str:
-    """ 調用工具 """
-    func = TOOL_REGISTRY.get(tool_name) # 找不到回傳 None
-
-    if not func: # 找不到函數
-        return f"錯誤：找不到名為 '{tool_name}' 的工具"
-
+def execute_tool(tool_name: str, args: dict) -> str:
+    """供 agent.py 調用執行的統一入口"""
+    if tool_name not in TOOL_REGISTRY:
+        return f"錯誤：找不到工具 '{tool_name}'"
     try:
-        return func(**tool_args) # ** 拆包
+        tool_func = TOOL_REGISTRY[tool_name]
+        return str(tool_func(**args))
     except Exception as e:
-        return f"錯誤：執行工具 '{tool_name}' 時發生異常：{e}"
+        return f"錯誤：執行工具 '{tool_name}' 失敗：{e}"
 
 # ========== 工具 ==========
 @tool_register(False)
-def read_file(file_path: str) -> str:
+def read_file(
+    file_path: Annotated[str, "要讀取的檔案路徑（支援相對路徑或以 ~ 開頭的路徑）"]
+) -> str:
     """ 讀取文字檔 """
     try:
         return Path(file_path).expanduser().read_text(encoding="utf-8")
@@ -35,7 +45,10 @@ def read_file(file_path: str) -> str:
         return f"錯誤：讀取檔案 '{file_path}' 失敗：{e}"
 
 @tool_register(True)
-def write_file(file_path: str, content: str) -> str:
+def write_file(
+    file_path: Annotated[str, "要寫入的目標檔案路徑"],
+    content: Annotated[str, "要寫入檔案的完整文字內容"]
+) -> str:
     """ 寫入到文字檔 """
     try:
         Path(file_path).expanduser().parent.mkdir(parents=True, exist_ok=True) # 建立上層資料夾
@@ -49,7 +62,11 @@ def write_file(file_path: str, content: str) -> str:
         return f"錯誤：寫入檔案 '{file_path}' 失敗：{e}"
 
 @tool_register(True)
-def edit_file(file_path: str, old_content: str, new_content: str):
+def edit_file(
+    file_path: Annotated[str, "要修改的目標檔案路徑"],
+    old_content: Annotated[str, "要被替換的原始文字片段（需與檔案內容完全相符且具唯一性）"],
+    new_content: Annotated[str, "替換後的新文字內容"]
+) -> str:
     """ 局部修改文字 """
     try:
         # 擋掉空字串
@@ -85,31 +102,46 @@ def edit_file(file_path: str, old_content: str, new_content: str):
 
 @tool_register(False)
 def list_file(
-    pattern: str, # Glob 規則
-    base_path: str = "." # 搜尋起點
+    pattern: Annotated[str, "Glob 比對規則（例如 '*.*'、'**/*.py'、'src/*'）"], # Glob 規則
+    base_path: Annotated[str, "搜尋起點目錄路徑（預設為 '.' 當前目錄）"] = ".", # 搜尋起點
+    offset: Annotated[int, "起始筆數偏移量（預設為 0，用於分頁讀取長清單）"] = 0,
+    limit: Annotated[int, "本次最多讀取的檔案數量（預設為 200）"] = 200
 ) -> str:
     """
     列出檔案
     如果要尋找專案外或使用者家目錄的檔案（例如 Downloads, Desktop），請務必修改 base_path 參數（如 '~/Downloads' 或 '/Users/...'）
     """
     files = []
+    search_idx = 0 # 紀錄總共已經搜巡到多少個了（非保留多少個）
+    has_more = False # 後面還有內容
     try:
         for file in Path(base_path).expanduser().glob(pattern):
-            if file.is_file():
-                files.append(str(file))
+            if not file.is_file():
+                continue
+
+            if search_idx >= offset: # 達到起始點索引
+
+                if len(files) < limit:
+                    files.append(str(file))
+                else:
+                    has_more = True
+                    break # 告知後面還有內容，且退出迴圈（如果沒內容自己就結束迴圈了，不會到這）
+
+            search_idx += 1
+                
     except Exception as e:
-        return f"錯誤：找不到路徑 '{base_path}'"
+        return f"錯誤：找不到路徑 {base_path},{e}"
 
-    return_files = "\n".join(files[:200]) # 只保留 200 個
+    return_files = "\n".join(files)
 
-    if len(files) > 200:
-        return_files += f"\n\n...（僅顯示前 200 筆，共 {len(files)} 個檔案。請使用更精確的 pattern 來縮小搜尋範圍）。"
+    if has_more:
+        return_files += f"\n\n...[僅顯示第 {offset+1}~{offset + limit} 筆，若要看下一頁，請傳入 offset={offset + limit}]"
     return return_files
 
 @tool_register(False)              
 def grep_search(
-    pattern: str, # Regex 表達式 -> 要比對的文字
-    base_path: str = "." # 搜尋起點
+    pattern: Annotated[str, "要搜尋的正則表達式或文字關鍵字（Regex Pattern）"], # Regex 表達式 -> 要比對的文字
+    base_path: Annotated[str, "搜尋起點目錄路徑（預設為 '.' 當前目錄）"] = "." # 搜尋起點
 ) -> str:
     """ 搜尋文字檔內容 """
     try:
@@ -145,7 +177,9 @@ def grep_search(
         return f"錯誤：找不到路徑 '{base_path}'"
 
 @tool_register(True) 
-def run_shell(command: str) -> str:
+def run_shell(
+    command: Annotated[str, "要在系統終端機執行的 Shell 指令"]
+) -> str:
     """ 執行終端指令 """
 
     try:
@@ -169,7 +203,11 @@ def run_shell(command: str) -> str:
         return f"錯誤：執行指令時發生錯誤：{e}"
 
 @tool_register(True)
-def web_fetch(url: str, offset: int = 0, limit: int = 3000) -> str:
+def web_fetch(
+    url: Annotated[str, "要抓取內容的網頁網址（必須以 http:// 或 https:// 開頭）"],
+    offset: Annotated[int, "讀取內容的起始字元偏移量（預設為 0，用於分頁讀取長網頁）"] = 0,
+    limit: Annotated[int, "本次讀取的最大字元數量（預設為 3000）"] = 3000
+) -> str:
     """ 獲取網頁內容並轉成文字"""
 
     # ========== 1. 驗證爲網址與 HTTP 請求  ==========
@@ -182,10 +220,10 @@ def web_fetch(url: str, offset: int = 0, limit: int = 3000) -> str:
 
     try:
         response = httpx.get(
-            url = url,
-            headers=headers,
-            follow_redirects=True,
-            timeout=10
+            url = url, # 網址
+            headers=headers, # 請求的標頭字典
+            follow_redirects=True, # 301 / 302 重定向轉址（防網址搬家）
+            timeout=10 # 逾時限制
         )
         response.raise_for_status() # 拋出連線異常 httpx.HTTPStatusError
 
@@ -199,17 +237,16 @@ def web_fetch(url: str, offset: int = 0, limit: int = 3000) -> str:
 
     # ========== 2. HTML -> Markdown ==========
     # ----- a. 提純 -----
-    doc = Document(text)
-
-    html_summary = doc.summary()
+    html_summary = Document(text).summary()
 
     if html_summary and len(html_summary) > 100: # 存在且沒有過度刪減
         text = html_summary
     # ----- b. 轉換 -----
     h = html2text.HTML2Text()
+
     h.ignore_images = True # 忽略圖片
     h.body_width = 0 # 不做自動換行
-    h.single_line_break = True # 換行不隔行
+    h.single_line_break = True # 換行不隔行 -> 避免 .md 格式的兩行之間隔一行
 
     text = h.handle(text)
 
@@ -223,7 +260,8 @@ def web_fetch(url: str, offset: int = 0, limit: int = 3000) -> str:
 
     if raw_end >= total_len:
         end = total_len
-    else:
+
+    else: # 讓內容不斷在一半
         search_start = max(offset, raw_end - 500) # 往回推 500 為搜尋邊界
 
         target_idx = text.rfind("\n\n", search_start, raw_end) # 找最後出現的，故從右開始找

@@ -13,7 +13,7 @@ class ToolCall:
 
 @dataclass
 class LLMResponse:
-    status: Literal["response", "thinking", "thinking_done", "prepare_tool", "tool_executed", "tool_rejected"]
+    status: Literal["response", "thinking", "thinking_done", "tool_calling", "tool_executed", "tool_rejected"]
     content: Optional[str] = None
     think_time: Optional[float] = None
     tool_name: Optional[str] = None
@@ -38,5 +38,5 @@ class LLMProvider(ABC):
         history_messages: list,
         tools: Optional[list] = None
     ) -> Iterator[StreamChunk]:
-        pass
+        ...
         

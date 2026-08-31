@@ -8,15 +8,11 @@ class OllamaProvider(LLMProvider):
     def __init__(self, model_name: str):
         super().__init__(model_name=model_name)
 
-    def stream_generate(self, history_messages: list, tools:Optional[List[Callable]] = None) -> Iterator[StreamChunk]:
+    def stream_generate(self, history_messages: list) -> Iterator[StreamChunk]:
 
-        # ========== A. 工具函數註冊表轉串列 ==========
-        tools_list = tools if tools is not None else list(TOOL_REGISTRY.values())
-        # 可傳入指定函數物件（在串列裡）則只使用它
-
-        # ========== B. 格式更改 ==========
+        # ========== A. 格式更改 ==========
         ollama_history_messsages = []
-        for msg  in history_messages: 
+        for msg in history_messages: 
             # msg 為 dict
             if msg["role"] == "assistant" and "tool_calls" in msg: # 對模型提出的工具調用做格式處理
                 ollama_history_messsages.append(
@@ -29,26 +25,25 @@ class OllamaProvider(LLMProvider):
                                     "name": call["name"],
                                     "arguments": call["args"]
                                 }
-                            } for call in msg["tool_calls"]
+                            } for call in msg["tool_calls"] # 如果單次多個調用
                         ]
                     }
                 )
             else: # 其餘不更改
                 ollama_history_messsages.append(msg)
 
-        # ========== C. 調用模型 ==========
+        # ========== B. 調用模型 ==========
         response = ollama.chat(
             model=self.model_name,
             messages=ollama_history_messsages,
             stream=True, # 流式輸出文字
-            tools=tools_list,
             options={
                 "num_ctx": 16384,
-                "num_thread": 8, # 多線程運算
+                "num_thread": 8, # 多執行緒，用幾個 GPU 核心
                 "temperature": 0.1 # 降低隨機性
             }
         )
-        # ========== D. 模型回傳處理 ==========
+        # ========== C. 模型回傳處理 ==========
         # 一次回傳一個 token 的內容，通過 agent.py 不斷呼叫達成流式輸出
         for chunk in response:
             if chunk.message.tool_calls: # tool use 時
@@ -75,6 +70,7 @@ class OllamaProvider(LLMProvider):
                 thinking = getattr(chunk.message, "thinking", None) # 用 getattr 防止模型沒有推理功能（沒有 message.thinking 屬性）
                 # 有推理能力模型在非推理時 message.thinking 回傳 None
 
-                content = chunk.message.content
+                content = chunk.message.content if chunk.message.content else None
+                # 為空字串則 None
 
-                yield StreamChunk(thinking_chunk=thinking, content_chunk=content)   
+                yield StreamChunk(thinking_chunk=thinking, content_chunk=content) 
