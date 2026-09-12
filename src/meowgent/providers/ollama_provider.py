@@ -1,5 +1,5 @@
 from .base import ToolCall, LLMProvider, StreamChunk
-from typing import Optional, Iterator, List, Callable
+from typing import Iterator
 import ollama
 from tool import TOOL_REGISTRY
 import json
@@ -11,11 +11,11 @@ class OllamaProvider(LLMProvider):
     def stream_generate(self, history_messages: list) -> Iterator[StreamChunk]:
 
         # ========== A. 格式更改 ==========
-        ollama_history_messsages = []
+        ollama_history_messages = []
         for msg in history_messages: 
             # msg 為 dict
             if msg["role"] == "assistant" and "tool_calls" in msg: # 對模型提出的工具調用做格式處理
-                ollama_history_messsages.append(
+                ollama_history_messages.append(
                     {
                         "role": "assistant",
                         "content": msg.get("content") or "",
@@ -30,12 +30,12 @@ class OllamaProvider(LLMProvider):
                     }
                 )
             else: # 其餘不更改
-                ollama_history_messsages.append(msg)
+                ollama_history_messages.append(msg)
 
         # ========== B. 調用模型 ==========
         response = ollama.chat(
             model=self.model_name,
-            messages=ollama_history_messsages,
+            messages=ollama_history_messages,
             stream=True, # 流式輸出文字
             options={
                 "num_ctx": 16384,

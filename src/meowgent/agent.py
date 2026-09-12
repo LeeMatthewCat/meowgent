@@ -11,27 +11,31 @@ def _extract_safe_text(
     full_text: str,
     start_tag: str = "<tool_call>",
     end_tag: str = "</tool_call>"
-) -> Tuple[str, Optional[str]]:
+) -> Tuple[str, Optional[str], List[str]]:
     """
-    從流式累積文本中提取安全的人類可見文本，以及當前正在生成的工具參數文字（若有）。
+    從流式累積文本中提取安全的人類可見文本、當前正在生成的工具參數文字（若有），
+    以及已完整閉合的工具調用列表（raw 字串）。
     
     回傳:
-        (safe_text, current_tool_text)
-        - safe_text: 已確認安全的人類自然語言
+        (safe_text, current_tool_text, completed_tools)
+        - safe_text: 已確認安全的人類自然語言（已過濾工具標籤與未閉合前綴）
         - current_tool_text: 正在生成中的工具呼叫字串（若當前未在工具區間則為 None）
+        - completed_tools: 已完整閉合（</tool_call> 之前）的工具 raw 內容列表
     """
-    safe_parts = []
-    current_tool_text = None
-    pos = 0
-    full_len = len(full_text)
+    safe_parts = [] # 已經提取出的模型回覆
+    completed_tools = [] # 已完整的工具調用請求
+    current_tool_text = None # 尚未完整的工具調用請求
+    start_pos = 0 # 目前進行到的索引
+    full_len = len(full_text) # 目前全文長
 
-    while pos < full_len:
-        start_idx = full_text.find(start_tag, pos)
+    while start_pos < full_len: # 遍歷完全文
+        start_target_idx = full_text.find(start_tag, start_pos)
 
-        if start_idx == -1:
-            # 後續沒有完整的 start_tag，檢查剩餘文字尾端是否有正在成形的前綴（如 "<tool"）
-            remaining = full_text[pos:]
-            trimmed_len = len(remaining)
+        if start_target_idx == -1: # 後續沒有完整的 start_tag，檢查剩餘文字尾端是否有正在成形的前綴（如 "<tool"）
+
+            remaining = full_text[start_pos:]
+            trimmed_len = len(remaining) # 用於下方迴圈計數
+
             for i in range(len(start_tag) - 1, 0, -1):
                 if remaining.endswith(start_tag[:i]):
                     trimmed_len -= i
@@ -40,10 +44,10 @@ def _extract_safe_text(
             break
         else:
             # 收集 <tool_call> 之前的安全文字
-            safe_parts.append(full_text[pos:start_idx])
+            safe_parts.append(full_text[start_pos:start_target_idx])
 
             # 尋找對應的 </tool_call>
-            content_start = start_idx + len(start_tag)
+            content_start = start_target_idx + len(start_tag)
             end_idx = full_text.find(end_tag, content_start)
 
             if end_idx == -1:
@@ -51,10 +55,11 @@ def _extract_safe_text(
                 current_tool_text = full_text[content_start:].strip()
                 break
             else:
-                # 找到完整的 </tool_call>，指針跳過整個工具區塊，繼續向後掃描
-                pos = end_idx + len(end_tag)
+                # 找到完整的 </tool_call>，記錄已閉合工具，指針跳過整個工具區塊繼續向後掃描
+                completed_tools.append(full_text[content_start:end_idx].strip())
+                start_pos = end_idx + len(end_tag)
 
-    return "".join(safe_parts), current_tool_text
+    return "".join(safe_parts), current_tool_text, completed_tools
 
 class Agent():
     def __init__(self, provider: LLMProvider, max_turns: int = 20):
@@ -134,6 +139,7 @@ class Agent():
             think_start_time = None
 
             tools_result: List[Tuple] = [] # 存放 [{ToolCall 物件, 執行結果}, ...]
+            completed_tools: List[str] = [] # 存放已閉合的工具 raw 字串
 
             def thinking_finish() -> Optional[LLMResponse]:
                 """ 判斷推理階段是否結束，若結束則清除版面並顯示推理時間 """
@@ -167,23 +173,22 @@ class Agent():
 
                     result_full_text += chunk.content_chunk
 
-                    # 抽出工具調用與人類文字
-                    safe_text, tool_text = _extract_safe_text(result_full_text)
+                    # 分離
+                    safe_text, tool_text, completed_tools = _extract_safe_text(result_full_text)
 
                     if tool_text is not None:
-                        # 正在生成工具參數：輸出單行跑馬燈事件
+                        # 還未完成的工具調用參數
                         yield LLMResponse(status="tool_calling", content=tool_text)
                     elif safe_text:
-                        # 流式輸出人類回答
+                        # 模型回答
                         yield LLMResponse(status="response", content=safe_text)
 
             # ========== C. 標籤解析與多輪工具執行 ==========
-            # 最後一輪時強制不解析工具（雙保險），確保輸出最終總結回答
-            tool_matches = list(re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", result_full_text, re.DOTALL)) if not is_last_turn else []
+            # 最後一輪時強制不執行工具（雙保險），確保輸出最終總結回答
+            tools_to_execute = completed_tools if not is_last_turn else []
 
-            if tool_matches:
-                for match in tool_matches:
-                    raw_json = match.group(1).strip() # 為 str
+            if tools_to_execute:
+                for raw_json in tools_to_execute:
                     try:
                         # 容錯清理 markdown 程式碼區塊符號（如 ```json ... ```）
                         cleaned_json = re.sub(r"^```json\s*|^```\s*|```$", "", raw_json, flags=re.MULTILINE).strip()
@@ -218,17 +223,17 @@ class Agent():
                     
                     if hasattr(tool_v, "result"): # 檢查是否有 .result() 可用
                         result = tool_v.result()
-                        is_sucess = True
+                        is_success = True
                     else:
                         result = tool_v
-                        is_sucess = False
+                        is_success = False
 
                     self.history_messages.append({
                         "role": "user",
                         "content": f"<tool_response>\n[工具 {t.tool_name} 執行結果]：\n{result}\n</tool_response>"
                     })
 
-                    status = "tool_executed" if is_sucess else "tool_rejected"
+                    status = "tool_executed" if is_success else "tool_rejected"
                     yield LLMResponse(status=status, tool_name=t.tool_name)
       
             else: # 沒有 tool use 需求，生成最終回答

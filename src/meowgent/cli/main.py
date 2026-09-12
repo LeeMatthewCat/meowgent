@@ -1,14 +1,15 @@
 from agent import Agent
-from providers import LLMResponse, GeminiProvider, OllamaProvider
+from providers import OllamaProvider
 from dotenv import load_dotenv
 from cli import get_input, get_tool_aproval, CLIRenderer, start_ollama, clean_ollama, handle_cmd, select_directory
 import os
+import sys
 
 load_dotenv() # 讀取 .env
 
 if __name__ == "__main__":
 
-    model_name = "fireboi25/qwythos-v2:q5"
+    model_name = "qwen3-vl:4b-thinking"
 
     # ----- 初始化模型 ----
     
@@ -22,13 +23,18 @@ if __name__ == "__main__":
     )
     # -----
 
-    os.chdir(path)
+    os.chdir(path) # 進入指定工作目錄
 
     cli = CLIRenderer() 
 
     cli.initialization() # 初始介面
 
-    process = start_ollama() # 啟動 ollama 進程
+    success, process = start_ollama() # 啟動 ollama 進程
+
+    if not success:
+        cli.console.print(cli.render_end("ollama 未被正常啟動"))
+
+        sys.exit(1) # 異常退出
 
     def ask_tool_approval(tool_name: str, tool_args: dict) -> bool:
         live.update("") # 清除分隔線，否則調用許可會出現在分隔線下方
@@ -59,9 +65,9 @@ if __name__ == "__main__":
                 continue # 跳過此次對話
             # -----
 
-            with cli.get_live() as live: # live 版面
+            response_streamer = cli.get_response_streamer()
 
-                response_streamer = cli.get_response_streamer()
+            with cli.get_live() as live: # live 版面 
 
                 for stream_content in model.chat(user_input=user_input, tool_approval=ask_tool_approval):
                     # ask_tool_approval() 的執行權在 agent.py 上
@@ -70,21 +76,21 @@ if __name__ == "__main__":
                         live.update(cli.render_single_line_streamer(stream_content.content))
 
                     elif stream_content.status == "thinking_done": # 清除推理內容，輸出推理總結
-                        live.update("") # 清空跑馬燈，絕不留幽靈橫線
+                        live.update("") # 清除推理內容及隔線
                         cli.console.print(cli.render_thinking_summary(stream_content.think_time))
                         
                     elif stream_content.status == "tool_calling": # 輸出工具參數生成跑馬燈
-                        live.update(cli.render_tool_calling_streamer(stream_content.content))
+                        live.update(cli.render_single_line_streamer(stream_content.content))
 
                     elif stream_content.status == "response": # 輸出模型回答內容
                         response_streamer.update_content(full_text=stream_content.content, live=live)
 
                     elif stream_content.status == "tool_executed": # 輸出工具調用成功
-                        response_streamer.reset(live=live) # 歸零長度記帳，確保第二輪開頭文字不被吞掉
+                        response_streamer.reset(live=live) # 歸零長度記帳，文字不被吞掉
                         cli.console.print(cli.render_tool_approval_result(stream_content.tool_name, True))
 
                     elif stream_content.status == "tool_rejected": # 輸出工具調用失敗
-                        response_streamer.reset(live=live) # 歸零長度記帳
+                        response_streamer.reset(live=live) # 歸零長度記帳，文字不被吞掉
                         cli.console.print(cli.render_tool_approval_result(stream_content.tool_name, False))
 
                 response_streamer.clean(live=live)

@@ -5,13 +5,12 @@ from rich.text import Text
 from rich.rule import Rule
 from rich.padding import Padding
 from rich.cells import cell_len
-from typing import Callable
 
 class ResponseStreamer: 
-    def __init__(self, console: Console, render_func: Callable[[str], Group]):
+    def __init__(self, renderer: "CLIRenderer"):
 
-        self.console = console
-        self.render_func = render_func
+        self.render = renderer
+        self.console = self.render.console
 
         self.last_len = 0 # 上次更新的長度
         self.cache = ""
@@ -23,25 +22,34 @@ class ResponseStreamer:
 
         self.cache += full_text[-update_len:] if update_len > 0 else ""
 
-        in_code_block = (self.cache.count("```") % 2 != 0) # T -> 無成對程式碼，F -> 有
+        done_code_block = (self.cache.count("```") % 2 == 0) # True -> 程式碼區塊完成
 
-        if not in_code_block and "\n\n" in self.cache: # 沒有程式碼區塊，且有換行
+        last_tag_idx = self.cache.rfind("```")
+        last_line_idx = self.cache.rfind("\n\n")
 
-            last_line_idx = self.cache.rfind("\n\n")
+        if done_code_block and last_line_idx != -1 and last_line_idx > last_tag_idx:
 
             live.update("") # 把上一次的 live 更新刪掉
 
-            self.console.print(Padding(Markdown(self.cache[:last_line_idx]), (0, 0, 0, 2)))
+            self.console.print(Padding(Markdown(self.cache[:last_line_idx]), (0, 0, 1, 2)))
 
             self.cache = self.cache[last_line_idx + 2:] 
 
-        if self.cache.strip(): # 還有未完成的內容（下一行），包含有成對程式碼全在此更新
-            
-            live.update(self.render_func(self.cache))
+        if self.cache.strip(): # 還有未完成的內容（下一行），包含有成對程式碼全在此更新  
+            live.update(
+                Group(
+                    Padding(Markdown(self.cache), (1 ,0, 0, 2)),
+                    self.render.get_rule()
+                )
+            )
 
     def reset(self, live: Live):
         """ 清空暫存並重置計數（工具調用時使用） """
-        live.update("")
+        
+        if self.cache.strip():
+           live.update("")
+           self.console.print(Padding(Markdown(self.cache), (0, 0, 0, 2))) 
+
         self.cache = ""
         self.last_len = 0
         
@@ -51,8 +59,12 @@ class ResponseStreamer:
         if self.cache.strip():
 
             live.update("")
-            self.console.print(Padding(Markdown(self.cache), (0, 0, 0, 2)))
-            self.console.print(Rule(style="dim", end=""))
+            self.console.print(
+                Group(
+                    Padding(Markdown(self.cache), (0, 0, 0, 2)),
+                    self.render.get_rule()
+                )
+            )
 
         self.cache = ""
         self.last_len = 0
@@ -72,7 +84,7 @@ class CLIRenderer:
         self.console.print(f"[blue] Meowgent CLI {version}[/blue]\n[dim] {user_name}[/dim]\n")
         self.console.print(self.get_rule())
 
-    def get_live(self, refresh_per_second: float = 10):
+    def get_live(self, refresh_per_second: float = 10) -> Live:
         """
         給定更新率，回傳 Live 版面
         """
@@ -109,17 +121,13 @@ class CLIRenderer:
     def render_tool_approval_result(self, tool_name: str, approval: bool) -> Text: # 工具調用結果渲染
 
         text_chunk = "[green]已被調用[/green]" if approval else "[red]未被調用[/red]"
-        return Padding(Text.from_markup(f"[dim]{tool_name}[/dim] {text_chunk}"), (0 ,0, 0, 2))   
-
-    def render_tool_calling_streamer(self, content: str) -> Group:
-        """ 工具參數生成中的單行跑馬燈（復用思考跑馬燈的單行裁切排版邏輯） """
-        return self.render_single_line_streamer(f"{content}")
-
-    def render_model_response(self, content: str) -> Group: # 回答渲染
-        return Group(
-            Padding(Markdown(content), (1 ,0, 0, 2)),
-            self.get_rule()
-        )
+        return Padding(Text.from_markup(f"[dim]{tool_name}[/dim] {text_chunk}"), (0 ,0, 0, 2))
 
     def get_response_streamer(self) -> ResponseStreamer:
-        return ResponseStreamer(console=self.console, render_func=self.render_model_response)
+        return ResponseStreamer(renderer=self)
+
+    def render_end(self, end_content: str = ""):
+        if end_content:
+            end_content += "\n"
+
+        return Padding(f"[red]{end_content}Meowgent 即將關閉[/red]", (0, 0, 0, 2))

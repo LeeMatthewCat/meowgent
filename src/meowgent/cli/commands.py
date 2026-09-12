@@ -6,6 +6,8 @@ from rich.padding import Padding
 import ollama
 from typing import Callable
 import sys
+from pathlib import Path
+import os
 
 # ----- 函數註冊 -----
 COMMAND_REGISTRY = {} # "指令": 對應函數
@@ -77,11 +79,32 @@ def _change_model(model_object: Agent, cli: CLIRenderer, **kwargs):
 @cmd_registry("/exit")
 def _exit(cli: CLIRenderer, **kwargs):
     """ 關閉 Meowgent """
-    cli.console.print(Padding("[red]Meowgent 即將關閉[/red]", (0, 0, 0, 2)))
+    cli.console.print(cli.render_end())
 
     sys.exit(0) # 退出程序
 
 @cmd_registry("/cd")
-def _change_path(arg: list, cli: CLIRenderer):
+def _change_path(args: list, cli: CLIRenderer, model_object: Agent, **kwargs):
     "選擇工作目錄"
+    from cli import select_directory
+    if args:
 
+        path = Path(" ".join(args)).expanduser()
+
+        if path.is_dir():
+            new_path = path
+
+        else:
+            cli.console.print(Padding("[red]查無此路徑[/red]", (0, 0, 0, 2)))
+            
+            new_path = select_directory(start_dir=str(Path.cwd()))
+            
+    else:
+        new_path = select_directory(start_dir=str(Path.cwd()))
+
+    if new_path:
+        os.chdir(new_path)
+
+        model_object.renew_system_prompt(path=str(Path.cwd()))
+
+        cli.console.print(Padding(f"[dim]路徑以切換到 {str(Path.cwd())}[/dim]", (0, 0, 0, 2)))
