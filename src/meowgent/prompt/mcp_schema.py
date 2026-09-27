@@ -14,7 +14,7 @@ def _tool_to_mcp_xml(tool: Callable) -> str:
     for arg_name, arg in sig.parameters.items():
         # ========== A. 提取型別與說明 ==========
         args_list = get_args(arg.annotation)
-        type = TypeAdapter(args_list[0]).json_schema()["type"]
+        param_type = TypeAdapter(args_list[0]).json_schema()["type"]
         desc = args_list[1]
         
         # ========== B. 必填／選填判定 ==========
@@ -23,13 +23,13 @@ def _tool_to_mcp_xml(tool: Callable) -> str:
         required_attr = "true" if is_required else "false"
 
         # ========== C. 轉成單行 XML 參數描述 ==========
-        params_xml.append(f'            <parameter name="{arg_name}" type="{type}" required="{required_attr}">')
+        params_xml.append(f'            <parameter name="{arg_name}" type="{param_type}" required="{required_attr}">')
         params_xml.append(f'              <description>{desc}{required_str}</description>')
-        params_xml.append(f'            </parameter>')
+        params_xml.append('            </parameter>')
 
     # ========== D. 組裝 ==========
     params_block = "\n".join(params_xml)
-    doc = inspect.getdoc(tool) or ""
+    doc = inspect.getdoc(tool).strip() or ""
     
     return textwrap.dedent(f"""
         <tool name="{tool.__name__}">

@@ -8,6 +8,11 @@ from typing import Callable
 import sys
 from pathlib import Path
 import os
+from config import MeowgentConfig, ConfigManager
+import inspect
+from rich.panel import Panel
+from pydantic import BaseModel, ValidationError
+from typing import get_origin, get_args, Literal, Optional
 
 # ----- 函數註冊 -----
 COMMAND_REGISTRY = {} # "指令": 對應函數
@@ -20,7 +25,7 @@ def cmd_registry(cmd_name: str, **kwargs): # 屬性裝飾器標註函數對應�
     return decorator
 # -----
 
-def handle_cmd(input: str,model_object: Agent, cli: CLIRenderer):
+def handle_cmd(input: str, model_object: Agent, cli: CLIRenderer, config: MeowgentConfig):
 
     func = COMMAND_REGISTRY.get(input.split()[0]) # 把空格以前切出來，也就是只切出指令部分，拿取函數物件，或回傳 None
 
@@ -30,7 +35,8 @@ def handle_cmd(input: str,model_object: Agent, cli: CLIRenderer):
         func(
             args = input.split()[1:], # 把除了指令的內容傳入
             model_object=model_object,
-            cli=cli
+            cli=cli,
+            config=config
         ) # 將後面的參數傳入
 
 @cmd_registry("/model")
@@ -69,6 +75,7 @@ def _change_model(model_object: Agent, cli: CLIRenderer, **kwargs):
 
         model_object.provider.model_name = new_model
         model_object.renew_system_prompt(model_name=new_model)
+        
 
         cli.console.print(Padding(f"[green]模型已成功切換為：{new_model}[/green]", (0, 0, 0, 2)))
 
@@ -85,7 +92,7 @@ def _exit(cli: CLIRenderer, **kwargs):
 
 @cmd_registry("/cd")
 def _change_path(args: list, cli: CLIRenderer, model_object: Agent, **kwargs):
-    "選擇工作目錄"
+    """ 選擇工作目錄 """
     from cli import select_directory
     if args:
 
@@ -107,4 +114,159 @@ def _change_path(args: list, cli: CLIRenderer, model_object: Agent, **kwargs):
 
         model_object.renew_system_prompt(path=str(Path.cwd()))
 
-        cli.console.print(Padding(f"[dim]路徑以切換到 {str(Path.cwd())}[/dim]", (0, 0, 0, 2)))
+        cli.console.print(Padding(f"[dim]路徑已切換到 {str(Path.cwd())}[/dim]", (0, 0, 0, 2)))
+
+@cmd_registry("/help")
+def _show_commands(cli: CLIRenderer, **kwargs):
+    """ 顯示各指令以及詳細功能 """
+
+    lines = []
+    for cmd_name, cmd_func in COMMAND_REGISTRY.items():
+        doc = inspect.getdoc(cmd_func).strip()
+
+        lines.append(f"[blue]{cmd_name: <15}[/blue][dim]{doc}[/dim]")
+
+    cli.console.print(Panel.fit(
+        "\n".join(lines),
+        title="可用指令",
+        border_style="dim",
+        padding=(0, 1, 0, 1)
+    ))
+    cli.console.print(cli.get_rule())
+
+@cmd_registry("/config")
+def _change_config(cli: CLIRenderer, config: MeowgentConfig, model_object: Agent, **kwargs):
+    """ 更改設定項目 """
+
+    def _cancel_select():
+        cli.console.print(Padding("[red]退出設定更改[/red]", (0, 0, 0, 2)))
+        cli.console.print(cli.get_rule())
+
+    def _type_validator(input: str) -> Optional[str]:
+        """ 驗證輸入使否合規 """
+
+        nonlocal new_value # 宣告修改外層變數（閉包）
+
+        format_dict = sub_mdoel.model_dump() # 取出內容轉字典
+
+        format_dict[field_name] = input # 將輸入值替換進去
+        
+        try:
+            validated_obj = sub_class.model_validate(format_dict)
+
+            new_value = getattr(validated_obj, field_name) # 已經不是字串，而是正確型別了
+
+            return True
+        
+        except ValidationError as e:
+            return f"驗證錯誤 {e.errors()[0]["msg"]}"
+        
+        except Exception as e:
+            return f"錯誤 {e}"
+
+    choices = ["|"]
+    cat_item = list(MeowgentConfig.model_fields.keys())
+    cat_num = len(cat_item)
+
+    # ========== A. 先拿上層大類別 ==========
+    for cat_idx, cat_name in enumerate(MeowgentConfig.model_fields.keys()):
+        # cat -> category 類別
+
+        sub_mdoel = getattr(config, cat_name) # getattr(...) 相當於 config.model、config.agent
+        sub_class: type[BaseModel] =sub_mdoel.__class__ # 取得類別
+
+        cat_doc = inspect.getdoc(sub_class).strip() # 名字（模型相關、Agent 行為
+
+        tree_prefix = "└──" if cat_idx == cat_num - 1 else "├──"
+        choices.append(questionary.Separator(f"{tree_prefix} {cat_doc}"))
+
+        # ========== B. 獲取大類別裡的每個子項目 ==========
+        field_item = list(sub_class.model_fields.items())
+        field_num = len(field_item)
+
+        for idx, (field_name, field_info) in enumerate(field_item):
+            
+            # 項目當前值
+            now_value = getattr(sub_mdoel, field_name) # 相當於 config.model.default_model
+            
+            # 項目解釋
+            desc = field_info.description # Field() 裡的 description 參數
+
+            indent = "    " if cat_idx == cat_num - 1 else "│   "
+            branch = "└── " if idx == field_num - 1 else "├── "
+
+            choices.append(questionary.Choice(title=f"{indent + branch}{desc} (目前: {now_value})", value=(cat_name, field_name)))
+
+        if cat_idx < cat_num - 1:
+            choices.append(questionary.Separator("│"))
+
+    # ========== C. 選單收尾 ==========
+    choices.append(questionary.Separator()) # 分隔線
+    choices.append("離開設定")
+
+    # ========== D. 開始選擇 ==========
+    select = questionary.select(
+        message="選擇設定項目",
+        choices=choices
+    ).ask()
+
+    # ========== E. 解析選擇 ==========
+
+    # ----- a. 退出 -----
+    if select == "離開設定" or select == None:
+        _cancel_select()
+        return
+    
+    # ----- b. 模型選單 -----
+    if select == ("models", "default_model"):
+        _change_model(model_object=model_object, cli=cli)
+        return
+
+    # ----- c. 提取資訊 -----
+    cat_name, field_name = select # 提取出選擇
+
+    sub_mdoel: BaseModel = getattr(config, cat_name)
+    sub_class = sub_mdoel.__class__
+
+    field_info = sub_class.model_fields[field_name] # 取出欄位內的內容
+    now_value = getattr(sub_mdoel, field_name) # 當前值
+    desc = field_info.description
+    value_type = field_info.annotation
+
+    # ----- d. 發放選項 -----
+    new_value = None
+
+    # -- 1. Literal 的 -- 
+    if get_origin(value_type) is Literal:
+
+        options = list(get_args(value_type))
+        options.append("取消")
+
+        new_value = questionary.select(
+            message=f"請選擇 {desc}：",
+            choices=options
+        ).ask()
+
+        if new_value == "取消" or new_value == None:
+            _cancel_select()
+            return
+    
+    # -- 2. 一般型別 --
+    else:
+        _ = questionary.text(
+            message=f"輸入 {desc} 的值：",
+            default=now_value,
+            validate=_type_validator # 會驗證直到通過（True），或 ctrl-c or esc 取消（None）
+        ).ask()
+
+    # ========== F. 存檔 ==========
+    if new_value is not None and new_value != now_value: # 成功更改值
+
+        setattr(sub_mdoel, field_name, new_value) # 更改屬性
+
+        ConfigManager.save_config(config)
+
+        cli.console.print(Padding(f"[green]{desc} 由 {now_value} 更新至 {new_value}[/green]", (0, 0, 0, 2)))
+
+    else:
+        cli.console.print(Padding(f"[dim]設定未變更[/dim]", (0, 0, 0, 2)))

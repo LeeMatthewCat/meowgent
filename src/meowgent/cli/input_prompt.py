@@ -1,4 +1,4 @@
-from prompt_toolkit import prompt, PromptSession
+from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from typing import Optional
 import questionary
@@ -25,7 +25,7 @@ def get_input() -> str:
 
     return _prompt_session.prompt("> ", completer=completer)
 
-def get_tool_aproval(tool_name: str, tool_args: dict) -> bool:
+def get_tool_approval(tool_name: str, tool_args: dict) -> bool:
     
     lines = []
     for k, v in tool_args.items():

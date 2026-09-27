@@ -38,7 +38,7 @@ class ResponseStreamer:
         if self.cache.strip(): # 還有未完成的內容（下一行），包含有成對程式碼全在此更新  
             live.update(
                 Group(
-                    Padding(Markdown(self.cache), (1 ,0, 0, 2)),
+                    Padding(Markdown(self.cache), (1, 0, 0, 2)),
                     self.render.get_rule()
                 )
             )
@@ -111,17 +111,17 @@ class CLIRenderer:
             content = "".join(reversed(output)) # 反轉回來拼成字串
 
         return Group(
-            Padding(Markdown(content, style="dim"), (0 ,0, 0, 2)),
+            Padding(Markdown(content, style="dim"), (0, 0, 0, 2)),
             self.get_rule()
         )
 
-    def render_thinking_summary(self, think_time: float) -> Text: # 推理總結渲染
-        return Padding(Text.from_markup(f"[dim]已思考{think_time}秒[/dim]"), (0 ,0, 0, 2))
+    def render_thinking_summary(self, think_time: float) -> Padding: # 推理總結渲染
+        return Padding(Text.from_markup(f"[dim]已思考 {think_time} 秒[/dim]"), (0, 0, 0, 2))
 
-    def render_tool_approval_result(self, tool_name: str, approval: bool) -> Text: # 工具調用結果渲染
+    def render_tool_approval_result(self, tool_name: str, approval: bool) -> Padding: # 工具調用結果渲染
 
         text_chunk = "[green]已被調用[/green]" if approval else "[red]未被調用[/red]"
-        return Padding(Text.from_markup(f"[dim]{tool_name}[/dim] {text_chunk}"), (0 ,0, 0, 2))
+        return Padding(Text.from_markup(f"[dim]{tool_name}[/dim] {text_chunk}"), (0, 0, 0, 2))
 
     def get_response_streamer(self) -> ResponseStreamer:
         return ResponseStreamer(renderer=self)

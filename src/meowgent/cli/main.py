@@ -1,19 +1,42 @@
 from agent import Agent
 from providers import OllamaProvider
 from dotenv import load_dotenv
-from cli import get_input, get_tool_aproval, CLIRenderer, start_ollama, clean_ollama, handle_cmd, select_directory
+from cli import get_input, get_tool_approval, CLIRenderer, start_ollama, clean_ollama, handle_cmd, select_directory
 import os
 import sys
+from config import ConfigManager, repair
 
 load_dotenv() # 讀取 .env
 
 if __name__ == "__main__":
 
-    model_name = "qwen3-vl:4b-thinking"
+    cli = CLIRenderer() 
+    
+    cli.initialization() # 初始介面
+
+    # ----- ollama 開啟 -----
+    success, process = start_ollama() # 啟動 ollama 進程
+    
+    if not success:
+        cli.console.print(cli.render_end("ollama 未被正常啟動"))
+
+        sys.exit(1) # 異常退出
+    # -----
+
+    # ----- 設定檔載入 -----
+    config_success, config = ConfigManager.load_config()
+
+    if not config_success: # 未成功
+        config = repair(config=config, cli=cli)
+    # -----
 
     # ----- 初始化模型 ----
-    
-    model = Agent(OllamaProvider(model_name=model_name))
+    model_name = config.models.default_model
+    model = Agent(
+        OllamaProvider(model_name=model_name, temperature=config.models.temperature),
+        max_turns=config.agent.max_turns,
+        tool_approval_mode=config.agent.tool_approval_mode
+    )
 
     path = select_directory()
     model.renew_system_prompt(
@@ -25,23 +48,13 @@ if __name__ == "__main__":
 
     os.chdir(path) # 進入指定工作目錄
 
-    cli = CLIRenderer() 
-
-    cli.initialization() # 初始介面
-
-    success, process = start_ollama() # 啟動 ollama 進程
-
-    if not success:
-        cli.console.print(cli.render_end("ollama 未被正常啟動"))
-
-        sys.exit(1) # 異常退出
-
     def ask_tool_approval(tool_name: str, tool_args: dict) -> bool:
+
         live.update("") # 清除分隔線，否則調用許可會出現在分隔線下方
         live.stop() # 停止 live 更新
 
         try:
-            approval = get_tool_aproval(tool_name, tool_args) # 呼叫取得輸入
+            approval = get_tool_approval(tool_name, tool_args) # 呼叫取得輸入
 
         finally:
 
@@ -61,7 +74,7 @@ if __name__ == "__main__":
 
             # ----- 指令功能 -----
             if user_input.startswith("/"):
-                handle_cmd(input=user_input, model_object=model, cli=cli)
+                handle_cmd(input=user_input, model_object=model, cli=cli, config=config)
                 continue # 跳過此次對話
             # -----
 

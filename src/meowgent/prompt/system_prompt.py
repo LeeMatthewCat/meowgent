@@ -1,7 +1,7 @@
 from typing import Optional
 import textwrap
 import platform
-from prompt import get_all_xml
+from .mcp_schema import get_all_xml
 
 def get_system_prompt(model_name: str, path: str, rule: Optional[str] = None, enable_tools: bool = True) -> str:
 
@@ -29,7 +29,9 @@ def get_system_prompt(model_name: str, path: str, rule: Optional[str] = None, en
             {{"name": "工具名稱", "arguments": {{"參數名稱": "值"}}}}
             </tool_call>
 
-            若需要同時執行多個無相依性的操作（例如同時讀取多個檔案或多個網頁），你可以在同一次回答中輸出多個 <tool_call>...</tool_call> 區塊，系統將會並發平行執行它們以提升效率。
+            若需要同時執行多個無相依性的操作（例如同時讀取多個檔案或多個網頁），
+            可以在同一次回答中輸出多個 <tool_call>...</tool_call> 區塊，
+            系統將會並發平行執行它們以提升效率。
         """).strip() # 工具調用格式
 
         tool_section = f"\n# 可用工具\n{mcp_tool}\n\n# 工具調用格式規範\n{tool_rule}"

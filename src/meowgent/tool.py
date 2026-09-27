@@ -7,13 +7,14 @@ from readability import Document
 import html2text
 from mcp.server.mcpserver import MCPServer
 import logging
+from config import CONFIG_DIR
 
 mcp = MCPServer("Meowgent")
 logging.getLogger().handlers.clear() # 刪去 mcp 做的日誌綁定
 
 TOOL_REGISTRY: Dict[str, Callable] = {}
 def tool_register(need_approval: bool = True):
-    """屬性裝飾器：同時註冊到 MCP 伺服器與內部字典"""
+    """函數裝飾器：同時註冊到 MCP 伺服器與內部字典"""
     def decorator(func: Callable):
         func.need_approval = need_approval # 標記是否需要審批
         
@@ -33,12 +34,29 @@ def execute_tool(tool_name: str, args: dict) -> str:
     except Exception as e:
         return f"錯誤：執行工具 '{tool_name}' 失敗：{e}"
 
+def _path_check(path: str) -> bool:
+
+    cwd = Path.cwd().resolve() # 當前工作目錄
+    path: Path = Path(path).expanduser().resolve()
+
+    if path.is_relative_to(cwd):
+        return True
+
+    if path.is_relative_to(CONFIG_DIR.resolve()):
+        return True
+
+    return False
+
 # ========== 工具 ==========
 @tool_register(False)
 def read_file(
     file_path: Annotated[str, "要讀取的檔案路徑（支援相對路徑或以 ~ 開頭的路徑）"]
 ) -> str:
     """ 讀取文字檔 """
+
+    if not _path_check(file_path):
+        return "路徑位於工作目錄之外，請更改路徑或向使用者提出更換工作目錄"
+
     try:
         return Path(file_path).expanduser().read_text(encoding="utf-8")
     except Exception as e:
@@ -50,6 +68,10 @@ def write_file(
     content: Annotated[str, "要寫入檔案的完整文字內容"]
 ) -> str:
     """ 寫入到文字檔 """
+
+    if not _path_check(file_path):
+        return "路徑位於工作目錄之外，請更改路徑或向使用者提出更換工作目錄"
+
     try:
         Path(file_path).expanduser().parent.mkdir(parents=True, exist_ok=True) # 建立上層資料夾
 
@@ -68,6 +90,10 @@ def edit_file(
     new_content: Annotated[str, "替換後的新文字內容"]
 ) -> str:
     """ 局部修改文字 """
+
+    if not _path_check(file_path):
+        return "路徑位於工作目錄之外，請更改路徑或向使用者提出更換工作目錄"
+
     try:
         # 擋掉空字串
         if not old_content:
@@ -111,6 +137,7 @@ def list_file(
     列出檔案
     如果要尋找專案外或使用者家目錄的檔案（例如 Downloads, Desktop），請務必修改 base_path 參數（如 '~/Downloads' 或 '/Users/...'）
     """
+
     files = []
     search_idx = 0 # 紀錄總共已經搜巡到多少個了（非保留多少個）
     has_more = False # 後面還有內容
@@ -130,7 +157,7 @@ def list_file(
             search_idx += 1
                 
     except Exception as e:
-        return f"錯誤：找不到路徑 {base_path},{e}"
+        return f"錯誤：找不到路徑 '{base_path}'：{e}"
 
     return_files = "\n".join(files)
 
@@ -140,10 +167,14 @@ def list_file(
 
 @tool_register(False)              
 def grep_search(
-    pattern: Annotated[str, "要搜尋的正則表達式或文字關鍵字（Regex Pattern）"], # Regex 表達式 -> 要比對的文字
+    pattern: Annotated[str, "要搜尋的正則表達式或文字關鍵字（Regex Pattern），"], # Regex 表達式 -> 要比對的文字
     base_path: Annotated[str, "搜尋起點目錄路徑（預設為 '.' 當前目錄）"] = "." # 搜尋起點
 ) -> str:
     """ 搜尋文字檔內容 """
+
+    if not _path_check(base_path):
+        return "路徑位於工作目錄之外，請更改路徑或向使用者提出更換工作目錄"
+
     try:
         rx = re.compile(pattern) # 預先編譯，不用每次迴圈都編譯一次
 
@@ -178,7 +209,7 @@ def grep_search(
 
 @tool_register(True) 
 def run_shell(
-    command: Annotated[str, "要在系統終端機執行的 Shell 指令"]
+    command: Annotated[str, "要在系統 Shell 執行的指令"]
 ) -> str:
     """ 執行終端指令 """
 

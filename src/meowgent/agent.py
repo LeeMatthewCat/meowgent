@@ -7,6 +7,11 @@ from typing import List, Callable, Optional, Iterator, Tuple
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+# ----- regex 預編譯 -----
+RX_CODE_BLOCK = re.compile(r"^```json\s*|^```\s*|```$", flags=re.MULTILINE)
+RX_GET_JSON = re.compile(r'"name"\s*:\s*"([^"]+)"')
+# -----
+
 def _extract_safe_text(
     full_text: str,
     start_tag: str = "<tool_call>",
@@ -62,9 +67,10 @@ def _extract_safe_text(
     return "".join(safe_parts), current_tool_text, completed_tools
 
 class Agent():
-    def __init__(self, provider: LLMProvider, max_turns: int = 20):
+    def __init__(self, provider: LLMProvider, max_turns: int = 20, tool_approval_mode: str = "default"):
         self.provider = provider # 直接傳入 provider = OllamaProvider(model_name)
         self.max_turns = max_turns
+        self.tool_approval_mode = tool_approval_mode
         self.history_messages = []
 
         self.rule = None
@@ -97,6 +103,7 @@ class Agent():
         ) # 使用者輸入加入多輪
 
         turns = 0
+
         while turns < self.max_turns: # 模型內迴圈，使用者輸入，模型多次調用
             # turns 為 self.max_turns - 1 時表示為最後一次
             
@@ -142,7 +149,7 @@ class Agent():
             completed_tools: List[str] = [] # 存放已閉合的工具 raw 字串
 
             def thinking_finish() -> Optional[LLMResponse]:
-                """ 判斷推理階段是否結束，若結束則清除版面並顯示推理時間 """
+                """ 判斷推理階段是否結束，若結束則計算並回傳推理耗時  """
                 nonlocal is_thinking, think_start_time
 
                 if is_thinking: # 表示為推理結束後進到回答或工具調用階段
@@ -188,15 +195,25 @@ class Agent():
             tools_to_execute = completed_tools if not is_last_turn else []
 
             if tools_to_execute:
+                
                 for raw_json in tools_to_execute:
                     try:
                         # 容錯清理 markdown 程式碼區塊符號（如 ```json ... ```）
-                        cleaned_json = re.sub(r"^```json\s*|^```\s*|```$", "", raw_json, flags=re.MULTILINE).strip()
+                        cleaned_json = RX_CODE_BLOCK.sub("", raw_json,).strip()
                         call_data = json.loads(cleaned_json)
 
                         t = ToolCall(tool_name=call_data["name"], args=call_data.get("arguments", {}))
 
-                        need_approval = getattr(TOOL_REGISTRY.get(t.tool_name, None), "need_approval", True)
+                        # ----- 審核模式判斷 -----
+                        if self.tool_approval_mode == "approval_all":
+                            need_approval = False
+
+                        elif self.tool_approval_mode == "always ask":
+                            need_approval = True
+
+                        else: # "default" 時
+                            need_approval = getattr(TOOL_REGISTRY.get(t.tool_name, None), "need_approval", True)
+                        # -----
 
                         if not need_approval or tool_approval(t.tool_name, t.args):
                             tools_result.append((t, self.executor.submit(execute_tool, t.tool_name, t.args)))
@@ -205,7 +222,7 @@ class Agent():
 
                     except Exception as e:
                         # 若 JSON 解析失敗，回饋錯誤提示
-                        name_match = re.search(r'"name"\s*:\s*"([^"]+)"', raw_json)
+                        name_match = RX_GET_JSON.search(raw_json)
                         tool_name = name_match.group(1) if name_match else "unknown"
 
                         err_tool = ToolCall(tool_name=tool_name, args={})
@@ -218,7 +235,7 @@ class Agent():
                 })
 
                 for t, tool_v in tools_result:
-                    # t 為 ToolCall，tool_v
+                    # t 為 ToolCall
                     # tool_v 為 Future 物件（執行中任務）或 str（被拒絕/出錯的提示字串）
                     
                     if hasattr(tool_v, "result"): # 檢查是否有 .result() 可用
