@@ -20,7 +20,7 @@ def repair(config: MeowgentConfig, cli: CLIRenderer) -> MeowgentConfig:
     model = Agent(
         OllamaProvider(model_name=config.models.default_model, temperature=config.models.temperature),
         max_turns=config.agent.max_turns,
-        tool_approval_mode=config.agent.tool_approval_mode
+        tool_approval_mode=config.agent.tool_approval_mode,
     )
 
     while True:
@@ -71,7 +71,7 @@ def repair(config: MeowgentConfig, cli: CLIRenderer) -> MeowgentConfig:
     # ========== D. 存檔 ==========
     cover_confirm = False
     use_default_confirm = False
-    if success: # 如果驗證格式格式
+    if success: # 如果驗證格式成功
         cli.console.print(Padding("[green]模型成功修復設定檔[/green]", (0, 0, 0, 2)))
         cover_confirm = questionary.confirm(
             "已成功修復設定檔，是否覆蓋套用？",
@@ -103,7 +103,7 @@ def repair(config: MeowgentConfig, cli: CLIRenderer) -> MeowgentConfig:
             ])
         ).ask() 
     
-    elif use_default_confirm: # 使用者同意套用預設值 -> 重置為全新乾淨的預設物件！
+    if use_default_confirm: # 使用者同意套用預設值 -> 重置為全新乾淨的預設物件！
 
         config = MeowgentConfig()
         ConfigManager.save_config(config)

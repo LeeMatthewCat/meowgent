@@ -1,4 +1,4 @@
-from agent import Agent
+from __future__ import annotations
 from cli import CLIRenderer
 import questionary
 from questionary import Style
@@ -12,7 +12,10 @@ from config import MeowgentConfig, ConfigManager
 import inspect
 from rich.panel import Panel
 from pydantic import BaseModel, ValidationError
-from typing import get_origin, get_args, Literal, Optional
+from typing import get_origin, get_args, Literal, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent import Agent
 
 # ----- 函數註冊 -----
 COMMAND_REGISTRY = {} # "指令": 對應函數
@@ -40,7 +43,7 @@ def handle_cmd(input: str, model_object: Agent, cli: CLIRenderer, config: Meowge
         ) # 將後面的參數傳入
 
 @cmd_registry("/model")
-def _change_model(model_object: Agent, cli: CLIRenderer, **kwargs):
+def _change_model(model_object: Agent, cli: CLIRenderer, config: MeowgentConfig, **kwargs):
     """ 選擇模型 """
 
     provider = questionary.select(
@@ -75,7 +78,11 @@ def _change_model(model_object: Agent, cli: CLIRenderer, **kwargs):
 
         model_object.provider.model_name = new_model
         model_object.renew_system_prompt(model_name=new_model)
-        
+
+        # ----- 存檔 -----
+        config.models.default_model = new_model
+        ConfigManager.save_config(config)
+        # -----  
 
         cli.console.print(Padding(f"[green]模型已成功切換為：{new_model}[/green]", (0, 0, 0, 2)))
 
@@ -163,19 +170,21 @@ def _change_config(cli: CLIRenderer, config: MeowgentConfig, model_object: Agent
         
         except Exception as e:
             return f"錯誤 {e}"
-
-    choices = ["|"]
+        
+    # ========== 初始化 ==========
+    choices = [questionary.Separator("|")]
+    
     cat_item = list(MeowgentConfig.model_fields.keys())
     cat_num = len(cat_item)
 
     # ========== A. 先拿上層大類別 ==========
-    for cat_idx, cat_name in enumerate(MeowgentConfig.model_fields.keys()):
+    for cat_idx, cat_name in enumerate(cat_item):
         # cat -> category 類別
 
         sub_mdoel = getattr(config, cat_name) # getattr(...) 相當於 config.model、config.agent
-        sub_class: type[BaseModel] =sub_mdoel.__class__ # 取得類別
+        sub_class: type[BaseModel] = sub_mdoel.__class__ # 取得類別
 
-        cat_doc = inspect.getdoc(sub_class).strip() # 名字（模型相關、Agent 行為
+        cat_doc = inspect.getdoc(sub_class).strip() # 名字（模型相關、Agent 行為）
 
         tree_prefix = "└──" if cat_idx == cat_num - 1 else "├──"
         choices.append(questionary.Separator(f"{tree_prefix} {cat_doc}"))
@@ -195,7 +204,10 @@ def _change_config(cli: CLIRenderer, config: MeowgentConfig, model_object: Agent
             indent = "    " if cat_idx == cat_num - 1 else "│   "
             branch = "└── " if idx == field_num - 1 else "├── "
 
-            choices.append(questionary.Choice(title=f"{indent + branch}{desc} (目前: {now_value})", value=(cat_name, field_name)))
+            choices.append(questionary.Choice(
+                title=f"{indent + branch}{desc} (目前: {now_value})",
+                value=(cat_name, field_name)
+            ))
 
         if cat_idx < cat_num - 1:
             choices.append(questionary.Separator("│"))
@@ -219,10 +231,10 @@ def _change_config(cli: CLIRenderer, config: MeowgentConfig, model_object: Agent
     
     # ----- b. 模型選單 -----
     if select == ("models", "default_model"):
-        _change_model(model_object=model_object, cli=cli)
+        _change_model(model_object=model_object, cli=cli, config=config)
         return
 
-    # ----- c. 提取資訊 -----
+    # ----- c. 提取資訊及發送選項 -----
     cat_name, field_name = select # 提取出選擇
 
     sub_mdoel: BaseModel = getattr(config, cat_name)
@@ -233,7 +245,6 @@ def _change_config(cli: CLIRenderer, config: MeowgentConfig, model_object: Agent
     desc = field_info.description
     value_type = field_info.annotation
 
-    # ----- d. 發放選項 -----
     new_value = None
 
     # -- 1. Literal 的 -- 
@@ -253,11 +264,15 @@ def _change_config(cli: CLIRenderer, config: MeowgentConfig, model_object: Agent
     
     # -- 2. 一般型別 --
     else:
-        _ = questionary.text(
+        text_result = questionary.text(
             message=f"輸入 {desc} 的值：",
-            default=now_value,
+            default=str(now_value), # 要求為字串，要避免為數字
             validate=_type_validator # 會驗證直到通過（True），或 ctrl-c or esc 取消（None）
         ).ask()
+
+        if text_result is None: # 如果輸入完值並完成驗證但最後退出選擇（因為驗證是邊輸入就邊在跑的）
+            _cancel_select()
+            return
 
     # ========== F. 存檔 ==========
     if new_value is not None and new_value != now_value: # 成功更改值
@@ -265,6 +280,15 @@ def _change_config(cli: CLIRenderer, config: MeowgentConfig, model_object: Agent
         setattr(sub_mdoel, field_name, new_value) # 更改屬性
 
         ConfigManager.save_config(config)
+
+        if cat_name == "models" and field_name == "temperature":
+            if hasattr(model_object.provider, "temperature"):
+                model_object.provider.temperature = new_value
+        elif cat_name == "agent":
+            if field_name == "max_turns":
+                model_object.max_turns = new_value
+            elif field_name == "tool_approval_mode":
+                model_object.tool_approval_mode = new_value
 
         cli.console.print(Padding(f"[green]{desc} 由 {now_value} 更新至 {new_value}[/green]", (0, 0, 0, 2)))
 

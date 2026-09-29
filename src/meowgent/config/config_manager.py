@@ -1,10 +1,10 @@
 from pathlib import Path
-from config import MeowgentConfig
+from .config_schema import MeowgentConfig
 from typing import Tuple, Optional
 
 # 定義位置
 CONFIG_DIR = Path.home() / ".meowgent"
-CONFIG_FILE =  CONFIG_DIR / "config.json"
+CONFIG_FILE = CONFIG_DIR / "config.json"
 
 class ConfigManager():
 
@@ -38,6 +38,6 @@ class ConfigManager():
 
                 return (True, config)
 
-            except Exception: # 讀取錯無時
+            except Exception: # 讀取錯誤時
 
                 return (False, MeowgentConfig())

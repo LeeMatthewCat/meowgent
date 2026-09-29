@@ -7,7 +7,7 @@ from readability import Document
 import html2text
 from mcp.server.mcpserver import MCPServer
 import logging
-from config import CONFIG_DIR
+from config.config_manager import CONFIG_DIR
 
 mcp = MCPServer("Meowgent")
 logging.getLogger().handlers.clear() # 刪去 mcp 做的日誌綁定
