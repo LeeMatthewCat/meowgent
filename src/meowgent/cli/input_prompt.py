@@ -1,5 +1,5 @@
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.completion import Completer, Completion
 from typing import Optional
 import questionary
 from prompt_toolkit.styles import Style
@@ -11,6 +11,16 @@ _prompt_session: Optional[PromptSession] = None # 內部私有
 
 COMMANDS = [k for k in COMMAND_REGISTRY]
 
+class CommandCompleter(Completer):
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+
+        # 只有在整行「以 / 開頭」且「還沒有按空格」時才跳出指令補全
+        if text.startswith("/") and " " not in text:
+            for cmd in COMMANDS:
+                if cmd.startswith(text):
+                    yield Completion(cmd, start_position=-len(text))
+
 def get_input() -> str:
 
     global _prompt_session
@@ -21,7 +31,7 @@ def get_input() -> str:
         })
     ) if _prompt_session is None else _prompt_session # 歷史輸入管理，如果已經建立過，不再建立
 
-    completer = WordCompleter(words=COMMANDS, ignore_case=True, WORD=True) # 建立補全器
+    completer = CommandCompleter() # 建立補全器
 
     return _prompt_session.prompt("> ", completer=completer)
 
