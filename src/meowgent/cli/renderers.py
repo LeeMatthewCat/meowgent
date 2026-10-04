@@ -126,8 +126,11 @@ class CLIRenderer:
     def get_response_streamer(self) -> ResponseStreamer:
         return ResponseStreamer(renderer=self)
 
-    def render_end(self, end_content: str = ""):
+    def render_end(self, end_content: str = "") -> Padding:
         if end_content:
             end_content += "\n"
 
         return Padding(f"[red]{end_content}Meowgent 即將關閉[/red]", (0, 0, 0, 2))
+
+    def render_not_support_vision(self) -> Padding:
+        return Padding("[red]此模型不支援圖片[/red][dim]，若要讀取圖片請用 /model 切換至支援的模型[/dim]", (0, 0, 0, 2))

@@ -1,15 +1,34 @@
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
-from typing import Optional
+from typing import Optional, List, Tuple
 import questionary
 from prompt_toolkit.styles import Style
 from pathlib import Path
 import inspect
 from cli import COMMAND_REGISTRY
+import re
+from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.key_binding import KeyBindings
+from questionary.prompts.common import InquirerControl
+import subprocess
+from rich.padding import Padding
+from rich.console import Console
+from prompt_toolkit.application.run_in_terminal import in_terminal
 
 _prompt_session: Optional[PromptSession] = None # 內部私有
 
 COMMANDS = [k for k in COMMAND_REGISTRY]
+
+RX_IMAGE_PATH = re.compile(
+    r"""(?:[~/\.]|\b[a-zA-Z]:[/\\])(?:\\ |[^\s])+\.(?:png|jpg|jpeg|webp|bmp)""",
+    flags=re.IGNORECASE # 忽略大小寫差異
+) # 正則預編譯
+
+attached_images: List[str] = [] # 圖片路徑暫存
+
+is_updating_input = False # T -> 修改是程式碼替換路徑為空白造成的，不是使用者打新的字，不要觸發 _on_text_change()
+
+just_extracted = False # 剛提取出圖片路徑，終端自動加上了空格並再觸發 _on_text_change()，要把這個空格去掉
 
 class CommandCompleter(Completer):
     def get_completions(self, document, complete_event):
@@ -21,19 +40,76 @@ class CommandCompleter(Completer):
                 if cmd.startswith(text):
                     yield Completion(cmd, start_position=-len(text))
 
-def get_input() -> str:
+def get_input() -> Tuple[str, List[str]]:
+
+    def _get_image_toolbar_text():
+        """ 獲得加入照片的文字提示 """
+        if not attached_images:
+            return None
+
+        text = "，".join([f"{Path(p).name}" for p in attached_images])
+
+        return f"已附加圖片：{text}"
+
+    def _on_text_change(buffer: Buffer):
+        """ 清理輸入顯示圖片路徑 """
+        global is_updating_input, just_extracted
+
+        if is_updating_input: # 擋住循環
+            return
+
+        clean_text = _extract_image_path(buffer.text)
+
+        if just_extracted:
+            just_extracted = False
+            clean_text = clean_text.rstrip()
+
+        if clean_text != buffer.text: # 防止內容一樣（白改了）
+
+            is_updating_input = True # 開始修改了，不要再觸發自己
+            
+            just_extracted = True # 不要觸發空格
+            
+            try:
+                buffer.text = clean_text
+
+            finally:
+                is_updating_input = False
 
     global _prompt_session
     
-    _prompt_session = PromptSession(
-        style=Style.from_dict({
-            "": "ansiblue"
-        })
-    ) if _prompt_session is None else _prompt_session # 歷史輸入管理，如果已經建立過，不再建立
+    if _prompt_session is None:
 
-    completer = CommandCompleter() # 建立補全器
+        kb = KeyBindings()
+        
+        @kb.add("c-o", eager=True) # 捕捉 ctrl o
+        async def catch_del_img(event):
+            async with in_terminal():
+                await _del_image()
+            event.app.invalidate()
 
-    return _prompt_session.prompt("> ", completer=completer)
+        _prompt_session = PromptSession(
+            style=Style.from_dict({
+                "": "ansiblue"
+            }),
+            completer=CommandCompleter(),
+            bottom_toolbar=_get_image_toolbar_text,
+            key_bindings=kb
+        ) # 歷史輸入管理，如果已經建立過，不再建立
+
+        _prompt_session.default_buffer.on_text_changed += _on_text_change # 掛載清理函數
+
+    user_input =  _prompt_session.prompt("> ").strip()
+    
+    # ----- 使用者輸入已結束 -----
+
+    images = list(attached_images) # 淺拷貝複製
+    attached_images.clear()
+
+    if not user_input and images: # 只有圖片，沒文字
+        user_input = "根據上下文內容處理圖片"
+
+    return user_input, images
 
 def get_tool_approval(tool_name: str, tool_args: dict) -> bool:
     
@@ -100,3 +176,83 @@ def select_directory(start_dir: Optional[str] = None) -> Optional[str]:
 
         else:
             now_dir = now_dir / select_dir
+
+def _extract_image_path(input: str) -> str:
+    """
+    過濾文字中是否有圖片
+    """
+
+    matches: List[str] = RX_IMAGE_PATH.findall(input)
+
+    if not matches: # 無任何匹配
+        return input
+
+    for row_path in matches:
+
+        path = Path(row_path.replace(r"\ ", " ")).expanduser().resolve() # 替換跳脫字元
+
+        if path.is_file():
+
+            input = input.replace(row_path, "") # 把路徑在文字中刪除
+            
+            if str(path) not in attached_images:
+
+                attached_images.append(str(path)) # 加入暫存
+
+    return input.strip()
+
+async def _del_image():
+    """ 刪除加到對話中的圖片 """
+    from cli import attached_images
+
+    console = Console()
+
+    def _render_del_msg():
+        console.print(Padding(f"[red]{Path(del_img).name} 已移除[/red]", (0, 0, 0, 2)))
+
+    if not attached_images:
+        console.print(Padding("[dim]無圖片[/dim]", (0, 0, 0, 2)))
+        return
+
+    elif len(attached_images) == 1: # 如果只有一張 -> 直接刪
+        del_img = attached_images[0]
+        attached_images.clear()
+        _render_del_msg()
+        return
+
+    else:
+        repeat = False
+        while attached_images: # 刪光時離開
+
+            img_list = []
+            for img in attached_images:
+                img_list.append(questionary.Choice(title=Path(img).name, value=img))
+
+            q = questionary.select(
+                "選擇要刪除的圖片",
+                choices=img_list + (["不繼續選擇"] if repeat else ["取消"]),
+                instruction="(Enter: 刪除, Ctrl+O: 開啟圖片)",
+                style=Style([
+                    ("question", "dim"),         
+                    ("instruction", "dim")
+                ])
+            )
+            repeat = True
+
+            ic = next(c for c in q.application.layout.find_all_controls() if isinstance(c, InquirerControl))
+
+            @q.application.key_bindings.add("c-o", eager=True)
+            def _open_preview(event):
+
+                current_img = ic.get_pointed_at().value
+
+                if current_img not in ("不繼續選擇", "取消"):  
+                    subprocess.Popen(["open", current_img])
+
+            del_img = await q.ask_async()
+
+            if del_img in ("不繼續選擇", "取消", None):
+                return
+
+            attached_images.remove(del_img)
+            _render_del_msg()

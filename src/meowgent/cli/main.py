@@ -5,6 +5,7 @@ from cli import get_input, get_tool_approval, CLIRenderer, start_ollama, clean_o
 import os
 import sys
 from config import ConfigManager, repair
+import ollama
 
 load_dotenv() # 讀取 .env
 
@@ -66,11 +67,18 @@ if __name__ == "__main__":
 
         while True: # 對話迴圈
 
-            user_input = get_input().strip()
-            # .strip() 清除頭尾的空格、換行符號、製表符（做表格用的），杜絕 / 指令誤判
+            user_input, images = get_input()
 
-            if not user_input: # 擋住空字串傳入
+            if not user_input and not images: # 擋住空字串傳入
                 continue
+
+            if images:
+                if "vision" not in (ollama.show(model.model_name).capabilities or []): # 不支援視覺時
+                    images = None
+
+                    cli.console.print(cli.render_not_support_vision())
+
+                    user_input = "[系統提示：使用者原本附帶了圖片，但當前模型不支援視覺讀取，圖片已被移除。請盡可能根據文字問題回答，並適度提醒使用者切換至視覺模型]\n\n" + user_input
 
             # ----- 指令功能 -----
             if user_input.startswith("/"):
@@ -82,7 +90,7 @@ if __name__ == "__main__":
 
             with cli.get_live() as live: # live 版面 
 
-                for stream_content in model.chat(user_input=user_input, tool_approval=ask_tool_approval):
+                for stream_content in model.chat(user_input=user_input, tool_approval=ask_tool_approval, images=images):
                     # ask_tool_approval() 的執行權在 agent.py 上
 
                     if stream_content.status == "thinking": # 輸出推理內容

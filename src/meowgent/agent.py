@@ -93,14 +93,17 @@ class Agent():
             self.path = path
         
         
-    def chat(self, user_input: str, tool_approval: Callable[[str, dict], bool]) -> Iterator[LLMResponse]:
+    def chat(self, user_input: str, tool_approval: Callable[[str, dict], bool], images: Optional[List[str]] = None) -> Iterator[LLMResponse]:
         
-        self.history_messages.append(
-            {
-                "role": "user",
-                "content": user_input
-            }
-        ) # 使用者輸入加入多輪
+        user_msg = {
+            "role": "user",
+            "content": user_input
+        }
+
+        if images:
+            user_msg["images"] = images
+
+        self.history_messages.append(user_msg)
 
         turns = 0
 

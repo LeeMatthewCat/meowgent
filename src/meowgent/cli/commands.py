@@ -13,6 +13,9 @@ import inspect
 from rich.panel import Panel
 from pydantic import BaseModel, ValidationError
 from typing import get_origin, get_args, Literal, Optional, TYPE_CHECKING
+from questionary.prompts.common import InquirerControl
+from prompt_toolkit.layout import Layout
+import subprocess
 
 if TYPE_CHECKING:
     from agent import Agent
@@ -60,9 +63,20 @@ def _change_model(model_object: Agent, cli: CLIRenderer, config: MeowgentConfig,
 
     if provider == "ollama":
         try:
+            model_list = [] 
+            for m in ollama.list()["models"]:
+
+                cap = ollama.show(m.model).capabilities or []
+
+                model_list.append(questionary.Choice(
+                    title=("[可讀取圖片] " if "vision" in cap else "[不支援圖片] ") + m.model,
+                    value=m.model
+                ))
+
             new_model = questionary.select(
                 "選擇模型",
-                choices=[m.model for m in ollama.list()["models"]] + ["取消"],
+                choices=model_list + ["取消"],
+                default=config.models.default_model,
                 style=Style([
                     ('question', 'dim'),         
                     ('instruction', 'dim')
@@ -73,7 +87,7 @@ def _change_model(model_object: Agent, cli: CLIRenderer, config: MeowgentConfig,
             cli.console.print(Padding("[yellow]未偵測到本機已安裝的 Ollama 模型，或 Ollama 尚未啟動[/yellow]", (0, 0, 0, 2)))
             return None
 
-        if new_model == "取消":
+        if new_model in ("取消", None):
             return None
 
         model_object.provider.model_name = new_model
@@ -147,10 +161,9 @@ def _change_config(cli: CLIRenderer, config: MeowgentConfig, model_object: Agent
 
     def _cancel_select():
         cli.console.print(Padding("[red]退出設定更改[/red]", (0, 0, 0, 2)))
-        cli.console.print(cli.get_rule())
 
     def _type_validator(input: str) -> Optional[str]:
-        """ 驗證輸入使否合規 """
+        """ 驗證輸入是否合規 """
 
         nonlocal new_value # 宣告修改外層變數（閉包）
 
@@ -166,7 +179,7 @@ def _change_config(cli: CLIRenderer, config: MeowgentConfig, model_object: Agent
             return True
         
         except ValidationError as e:
-            return f"驗證錯誤 {e.errors()[0]["msg"]}"
+            return f"驗證錯誤 {e.errors()[0]['msg']}"
         
         except Exception as e:
             return f"錯誤 {e}"
@@ -274,7 +287,7 @@ def _change_config(cli: CLIRenderer, config: MeowgentConfig, model_object: Agent
             _cancel_select()
             return
 
-    # ========== F. 存檔 ==========
+    # ========== F. 存檔及應用 ==========
     if new_value is not None and new_value != now_value: # 成功更改值
 
         setattr(sub_mdoel, field_name, new_value) # 更改屬性
@@ -293,4 +306,4 @@ def _change_config(cli: CLIRenderer, config: MeowgentConfig, model_object: Agent
         cli.console.print(Padding(f"[green]{desc} 由 {now_value} 更新至 {new_value}[/green]", (0, 0, 0, 2)))
 
     else:
-        cli.console.print(Padding(f"[dim]設定未變更[/dim]", (0, 0, 0, 2)))
+        cli.console.print(Padding(f"[dim]設定未變更[/dim]", (0, 0, 0, 2)))     
