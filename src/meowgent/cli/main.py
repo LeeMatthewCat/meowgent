@@ -1,3 +1,9 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from providers import LLMResponse
+
 from agent import Agent
 from providers import OllamaProvider
 from dotenv import load_dotenv
@@ -6,12 +12,64 @@ import os
 import sys
 from config import ConfigManager, repair
 import ollama
+import threading
+from typing import Optional
+from tool import set_subagent_callback
 
 load_dotenv() # 讀取 .env
+
+_subagents_active_status = {}
+_subagent_lock = threading.Lock() # 防止多個執行緒同時修改 _active_subagents
+
+def on_subagent_status(subagent_id: str, stream_content: Optional[LLMResponse] = None, is_end: bool = False):
+    """
+    子模型的回調參數，
+    針對 subagent_once() 傳入的狀態做輸出
+    """ 
+
+    with _subagent_lock:
+
+        if is_end:
+            _subagents_active_status.pop(subagent_id, None) # 刪除
+
+            cli.console.print(cli.render_subagent_end(subagent_id))
+
+            live.update(cli.render_active_subagents(_subagents_active_status))
+
+            return
+
+        if stream_content is None:
+            return
+
+        status = stream_content.status
+
+        last_status = _subagents_active_status.get(subagent_id)
+
+        # 動態
+        if status in ("thinking", "tool_calling", "response"):
+
+            if status != last_status: # 狀態改變才刷新
+
+                _subagents_active_status[subagent_id] = status
+
+                live.update(cli.render_active_subagents(
+                    active_subagents=_subagents_active_status,
+                ))
+        # 靜態
+        elif status == "thinking_done":
+            cli.console.print(cli.render_thinking_summary(stream_content.think_time))
+
+        elif status == "tool_executed":
+            cli.console.print(cli.render_tool_approval_result(stream_content.tool_name, True, subagent_id))
+
+        elif status == "tool_rejected":
+            cli.console.print(cli.render_tool_approval_result(stream_content.tool_name, False, subagent_id))
+
 
 if __name__ == "__main__":
 
     cli = CLIRenderer() 
+    set_subagent_callback(on_subagent_status)
     
     cli.initialization() # 初始介面
 

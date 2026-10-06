@@ -67,10 +67,11 @@ def _extract_safe_text(
     return "".join(safe_parts), current_tool_text, completed_tools
 
 class Agent():
-    def __init__(self, provider: LLMProvider, max_turns: int = 20, tool_approval_mode: str = "default"):
+    def __init__(self, provider: LLMProvider, max_turns: int = 20, tool_approval_mode: str = "default", tool_list: Optional[list] = None):
         self.provider = provider # 直接傳入 provider = OllamaProvider(model_name)
         self.max_turns = max_turns
         self.tool_approval_mode = tool_approval_mode
+        self.tool_list = tool_list
         self.history_messages = []
 
         self.rule = None
@@ -123,7 +124,8 @@ class Agent():
                         model_name=self.model_name,
                         path=self.path,
                         rule=self.rule,
-                        enable_tools=not is_last_turn # 最後一輪禁用工具說明
+                        enable_tools=not is_last_turn, # 最後一輪禁用工具說明
+                        tool_list=self.tool_list
                     )
                 }
             ] + self.history_messages

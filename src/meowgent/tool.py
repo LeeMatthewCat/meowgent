@@ -1,13 +1,38 @@
 from pathlib import Path 
 import re
 import subprocess
-from typing import Annotated, Callable, Dict, Any
+from typing import Annotated, Callable, Dict, Literal
 import httpx
 from readability import Document
 import html2text
 from mcp.server.mcpserver import MCPServer
 import logging
 from config.config_manager import CONFIG_DIR
+from config import ConfigManager
+import itertools
+
+ROLE_PRESETS = {
+    "explorer": {
+        "rule": "你是一個專業的程式碼檢索專員。請在工作目錄中快速查找程式碼與檔案，並提供最簡明扼要的摘要結論。嚴禁修改任何檔案。",
+        "tools": ["read_file", "list_file", "grep_search", "web_fetch"],  # 唯讀工具
+    },
+    "reviewer": {
+        "rule": "你是一個嚴謹的代碼審查專員（Code Reviewer）。請仔細閱讀給定的程式碼檔案，指出架構設計問題、潛在 Bug 或可改進之處。",
+        "tools": ["read_file"],  # 只需要讀檔
+    },
+    "tester": {
+        "rule": "你是一個測試與除錯工程師。請執行測試指令，並分析回報的錯誤日誌與失敗原因。",
+        "tools": ["read_file", "run_shell"],  # 允許執行終端命令
+    },
+}
+
+_subagent_counter = itertools.count(1)
+_subagent_callback = None
+
+def set_subagent_callback(callback: Callable):
+    """供外部（如 main.py）設定子 Agent 的狀態回調函式"""
+    global _subagent_callback
+    _subagent_callback = callback
 
 mcp = MCPServer("Meowgent")
 logging.getLogger().handlers.clear() # 刪去 mcp 做的日誌綁定
@@ -303,3 +328,69 @@ def web_fetch(
     suffix = f"\n\n[內容已截斷。若要閱讀下一頁，請呼叫 web_fetch 並帶入 offset={end}]" if total_len > end else ""
 
     return f"[顯示字元區間 {offset}~{end}，總字數為 {total_len}]\n" + text[offset:end] + suffix
+
+@tool_register(True)
+def subagent_once(
+    task: Annotated[str, "要交付的任務說明"],
+    role: Annotated[
+        Literal["explorer", "reviewer", "tester"],
+        "子 Agent 的角色：'explorer'（唯讀快速檢索代碼）、'reviewer'（審查代碼與抓 Bug）、'tester'（執行測試命令）"
+    ]
+):
+    """
+    將單次子任務委派給獨立的子 Agent 處理。
+    子 Agent 會在背景自主查找資料並返回最終總結，執行完畢後立即關閉，不保留對話歷史。
+    """
+    from agent import Agent
+    from providers import OllamaProvider 
+
+    # ========== A. 初始化 ==========
+    _, config = ConfigManager.load_config()
+
+    sub_model_name = config.sub_agent.sub_agent_model
+
+    rule = ROLE_PRESETS[role]["rule"]
+
+    tool_list = ROLE_PRESETS[role]["tools"]
+
+    sub_model = Agent(
+        OllamaProvider(
+            model_name=sub_model_name,
+            temperature=config.sub_agent.sub_temperature,
+        ),
+        max_turns=config.agent.max_turns,
+        tool_approval_mode="approval_all",
+        tool_list=tool_list
+    )
+
+    sub_model.renew_system_prompt(
+        rule=rule,
+        model_name=sub_model_name,
+        path=str(Path.cwd())
+    )
+
+    subagent_id = f"{role}#{next(_subagent_counter)}" # 子 agent id，用於辨識身份
+
+    # ========== B. 調用模型 ==========
+    final_report = ""
+
+    for stream_content in sub_model.chat(
+        user_input=task,
+        tool_approval=lambda *args: True # 接收 t.tool_name、t.args，直接回傳 True
+    ):
+        if _subagent_callback:
+            _subagent_callback(subagent_id, stream_content)
+
+        if stream_content.status == "response":
+            final_report = stream_content.content or ""
+
+    # ========== C. 任務結束退場 ==========
+    if _subagent_callback:
+        _subagent_callback(subagent_id, is_end=True)
+
+    return final_report if final_report.strip() else "（子 Agent 執行完畢，無輸出內容）"
+        
+        
+
+
+

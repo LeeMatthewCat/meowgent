@@ -1,10 +1,11 @@
 from rich.console import Console, Group
 from rich.live import Live
 from rich.markdown import Markdown
-from rich.text import Text
 from rich.rule import Rule
 from rich.padding import Padding
 from rich.cells import cell_len
+from rich.spinner import Spinner
+from rich.markup import escape
 
 class ResponseStreamer: 
     def __init__(self, renderer: "CLIRenderer"):
@@ -116,12 +117,14 @@ class CLIRenderer:
         )
 
     def render_thinking_summary(self, think_time: float) -> Padding: # 推理總結渲染
-        return Padding(Text.from_markup(f"[dim]已思考 {think_time} 秒[/dim]"), (0, 0, 0, 2))
+        return Padding(f"[dim]已思考 {think_time} 秒[/dim]", (0, 0, 0, 2))
 
-    def render_tool_approval_result(self, tool_name: str, approval: bool) -> Padding: # 工具調用結果渲染
+    def render_tool_approval_result(self, tool_name: str, approval: bool, subagnet_name: str = "") -> Padding: # 工具調用結果渲染
 
-        text_chunk = "[green]已被調用[/green]" if approval else "[red]未被調用[/red]"
-        return Padding(Text.from_markup(f"[dim]{tool_name}[/dim] {text_chunk}"), (0, 0, 0, 2))
+        " " + subagnet_name + " " if subagnet_name else ""
+
+        text_chunk = f"[green]已被{subagnet_name}調用[/green]" if approval else f"[red]未被{subagnet_name}調用[/red]"
+        return Padding(f"[dim]{tool_name}[/dim] {text_chunk}", (0, 0, 0, 2))
 
     def get_response_streamer(self) -> ResponseStreamer:
         return ResponseStreamer(renderer=self)
@@ -134,3 +137,35 @@ class CLIRenderer:
 
     def render_not_support_vision(self) -> Padding:
         return Padding("[red]此模型不支援圖片[/red][dim]，若要讀取圖片請用 /model 切換至支援的模型[/dim]", (0, 0, 0, 2))
+    
+    def render_active_subagents(
+        self,
+        active_subagents: dict,
+    ) -> Group:
+        """ 將所有正在運作的子 agent 渲然狀態 """
+        if not active_subagents:
+            return ""
+
+        status_text_map = {
+            "thinking": "思考分析中...",
+            "tool_calling": "正在準備調用工具...",
+            "response": "正在彙整分析結果...",
+        }
+
+        spinners = []
+        for agent_id, st in active_subagents.items():
+            text = status_text_map.get(st)
+            
+            # 產生轉圈圈物件
+            spinners.append(
+                Padding(
+                    Spinner("dots", text=f"[dim]{escape(f'[{agent_id}]')} {text}[/dim]"),
+                    (0, 0, 0, 2),
+                )
+            )
+
+        # 底部加上一條分隔線
+        return Group(*spinners, self.get_rule())
+
+    def render_subagent_end(self, subagent_id: str) -> Padding:
+        return Padding(f"[green]✔ {escape(f'[{subagent_id}]')} 專家任務已完成[/green]", (0, 0, 0, 2))

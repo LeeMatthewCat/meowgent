@@ -3,7 +3,12 @@ import textwrap
 import platform
 from .mcp_schema import get_all_xml
 
-def get_system_prompt(model_name: str, path: str, rule: Optional[str] = None, enable_tools: bool = True) -> str:
+def get_system_prompt(
+        model_name: str,
+        path: str, rule: Optional[str] = None,
+        enable_tools: bool = True,
+        tool_list: Optional[list] = None
+) -> str:
 
     if rule is None: # 預設角色規範
         rule = textwrap.dedent("""
@@ -21,7 +26,7 @@ def get_system_prompt(model_name: str, path: str, rule: Optional[str] = None, en
     
     tool_section = ""
     if enable_tools:
-        mcp_tool = get_all_xml() # 可用工具
+        mcp_tool = get_all_xml(tool_list) # 可用工具
 
         tool_rule = textwrap.dedent(f"""
             當你需要使用工具時，必須嚴格使用 <tool_call> 標籤包裹 JSON，格式如下：

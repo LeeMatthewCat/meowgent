@@ -1,6 +1,6 @@
 import inspect
 import textwrap
-from typing import Callable, get_args
+from typing import Callable, get_args, Optional
 from pydantic import TypeAdapter
 from tool import TOOL_REGISTRY
 
@@ -40,16 +40,27 @@ def _tool_to_mcp_xml(tool: Callable) -> str:
         </tool>
     """).strip()
 
-def get_all_xml() -> str:
+def get_all_xml(tool_list: Optional[list] = None) -> str:
     """取得所有已註冊工具的完整 XML 區塊（帶快取）"""
     global _MCP_TOOL_CACHE
     
+    if tool_list: # 有指定工具
+
+        tool_nodes = []
+        for tool_name, tool_func in TOOL_REGISTRY.items():
+
+            if tool_name in tool_list: 
+                tool_nodes.append(_tool_to_mcp_xml(tool_func))
+
+        return "<tools>\n" + "\n".join(tool_nodes) + "\n</tools>"
+    
     if not _MCP_TOOL_CACHE:
         tool_nodes = []
-        for _, tool in TOOL_REGISTRY.items():
-            tool_nodes.append(_tool_to_mcp_xml(tool))
+        for _, tool_func in TOOL_REGISTRY.items():
+            tool_nodes.append(_tool_to_mcp_xml(tool_func))
         
         # 組裝成完整的 <tools> XML 區塊
         _MCP_TOOL_CACHE = "<tools>\n" + "\n".join(tool_nodes) + "\n</tools>"
+    
         
     return _MCP_TOOL_CACHE
