@@ -30,7 +30,7 @@ _subagent_counter = itertools.count(1)
 _subagent_callback = None
 
 def set_subagent_callback(callback: Callable):
-    """供外部（如 main.py）設定子 Agent 的狀態回調函式"""
+    """ 供外部（如 main.py）設定子 Agent 的狀態回呼函式 """
     global _subagent_callback
     _subagent_callback = callback
 
@@ -39,7 +39,7 @@ logging.getLogger().handlers.clear() # 刪去 mcp 做的日誌綁定
 
 TOOL_REGISTRY: Dict[str, Callable] = {}
 def tool_register(need_approval: bool = True):
-    """函數裝飾器：同時註冊到 MCP 伺服器與內部字典"""
+    """ 函數裝飾器：同時註冊到 MCP 伺服器與內部字典 """
     def decorator(func: Callable):
         func.need_approval = need_approval # 標記是否需要審批
         
@@ -50,7 +50,7 @@ def tool_register(need_approval: bool = True):
     return decorator
 
 def execute_tool(tool_name: str, args: dict) -> str:
-    """供 agent.py 調用執行的統一入口"""
+    """ 供 agent.py 調用執行的統一入口 """
     if tool_name not in TOOL_REGISTRY:
         return f"錯誤：找不到工具 '{tool_name}'"
     try:
@@ -389,8 +389,3 @@ def subagent_once(
         _subagent_callback(subagent_id, is_end=True)
 
     return final_report if final_report.strip() else "（子 Agent 執行完畢，無輸出內容）"
-        
-        
-
-
-

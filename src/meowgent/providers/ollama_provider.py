@@ -3,9 +3,10 @@ from typing import Iterator
 import ollama
 
 class OllamaProvider(LLMProvider):
-    def __init__(self, model_name: str, temperature: float = 0.1):
+    def __init__(self, model_name: str, temperature: float = 0.1, context: int = 16384):
         super().__init__(model_name=model_name)
         self.temperature = temperature
+        self.context = context
 
     def stream_generate(self, history_messages: list) -> Iterator[StreamChunk]:
 
@@ -15,7 +16,7 @@ class OllamaProvider(LLMProvider):
             messages=history_messages,
             stream=True, # 流式輸出文字
             options={
-                "num_ctx": 16384,
+                "num_ctx": self.context,
                 "num_thread": 8, # 多執行緒，用幾個 GPU 核心
                 "temperature": self.temperature # 降低隨機性
             }
@@ -30,4 +31,15 @@ class OllamaProvider(LLMProvider):
             content = chunk.message.content if chunk.message.content else None
             # 為空字串則 None
 
-            yield StreamChunk(thinking_chunk=thinking, content_chunk=content) 
+            # ----- token 回傳 -----
+            token = None
+            if chunk.done: # 輸出完成時
+
+                prompt_eval = getattr(chunk, "prompt_eval_count", 0) or 0
+                eval_cnt = getattr(chunk, "eval_count", 0) or 0
+
+                if prompt_eval or eval_cnt:
+                    token = prompt_eval + eval_cnt # 輸入的 token（含歷史）+ 輸出的 token
+            # -----
+
+            yield StreamChunk(thinking_chunk=thinking, content_chunk=content, token=token) 

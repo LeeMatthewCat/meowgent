@@ -10,6 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 # ----- regex 預編譯 -----
 RX_CODE_BLOCK = re.compile(r"^```json\s*|^```\s*|```$", flags=re.MULTILINE)
 RX_GET_JSON = re.compile(r'"name"\s*:\s*"([^"]+)"')
+
+RX_CJK_PATTERN = re.compile(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]')
 # -----
 
 def _extract_safe_text(
@@ -66,6 +68,18 @@ def _extract_safe_text(
 
     return "".join(safe_parts), current_tool_text, completed_tools
 
+def estimate_token(text: str) -> int:
+    """ 估算出傳入文字的 token 量 """
+    
+    # 中日韓文、全形標點
+    cjk_count = len(RX_CJK_PATTERN.findall(text))
+    
+    # 其餘字元（英文、數字、程式碼標點、半形空白等）
+    other_chars_count = len(text) - cjk_count
+
+    # 中文每字約 1.3 token，其餘每 3.5 字元約 1 token
+    return int((cjk_count * 1.3) + (other_chars_count / 3.5))
+
 class Agent():
     def __init__(self, provider: LLMProvider, max_turns: int = 20, tool_approval_mode: str = "default", tool_list: Optional[list] = None):
         self.provider = provider # 直接傳入 provider = OllamaProvider(model_name)
@@ -78,7 +92,10 @@ class Agent():
         self.model_name = self.provider.model_name
         self.path = None
 
-        self.executor = ThreadPoolExecutor(max_workers=4) # 任務池（同步處理工具調用）
+        self.executor = ThreadPoolExecutor(max_workers=4) # 任務池（同步處理工具調用
+
+        self.true_token: Optional[int] = None
+        self.last_system_prompt: Optional[str] = None # 記錄上次生效的提示詞
 
     def renew_system_prompt(self,rule: Optional[str] = None, model_name: Optional[str] = None, path: Optional[str] = None):
         """ 取得提示詞更新 """
@@ -92,7 +109,45 @@ class Agent():
 
         if path is not None:
             self.path = path
+
+    def get_context_status_text(self, user_input: Optional[str] = None) -> Optional[str]:
+        """ 獲取上下文佔用文字 """
+
+        system_prompt = get_system_prompt(
+            model_name=self.model_name,
+            path=self.path,
+            rule=self.rule,
+            enable_tools=True
+        )
         
+        # 最大上下文
+        max_context = getattr(self.provider, "context", 16384) # 獲取 OllamaProvider 物件的 self.context
+        max_context_k = round(max_context / 1000, 1)
+
+        if self.true_token: 
+
+            system_prompt_token_gap = 0
+            if self.last_system_prompt and self.last_system_prompt != system_prompt:
+                system_prompt_token_gap = estimate_token(system_prompt) - estimate_token(self.last_system_prompt) # 算出舊的跟新的差多少
+
+            input_token = estimate_token(user_input) if user_input else 0
+
+            total_token = self.true_token + system_prompt_token_gap + input_token
+
+        else:
+            
+            total_text = system_prompt + (user_input or "")
+
+            for msg in self.history_messages: # 取 sys prompt，讓沒 true_token 時也可正常運行
+                total_text += msg["content"]
+
+            total_token = estimate_token(total_text)
+
+        total_token_k = round(total_token / 1000, 1) # 單位轉為 k
+
+        percentage = round((total_token / max_context) * 100, 1)
+        
+        return f"[{total_token_k}k/{max_context_k}k] {percentage}%"
         
     def chat(self, user_input: str, tool_approval: Callable[[str, dict], bool], images: Optional[List[str]] = None) -> Iterator[LLMResponse]:
         
@@ -169,6 +224,11 @@ class Agent():
 
             # ========== B. 處理模型回應 ==========
             for chunk in response:
+
+                if chunk.token:
+                    self.true_token = chunk.token
+
+                    self.last_system_prompt = temp_history_messages[0]["content"] # 記下當前輪次的提示詞
             
                 if chunk.thinking_chunk: # 推理
                     is_thinking = True
@@ -266,5 +326,7 @@ class Agent():
                     "role": "assistant",
                     "content": result_full_text
                 })
+
+                
 
                 break # 模型沒有調用工具 -> 表示已經生成最終回答，故退出 while turns < self.max_turns: 迴圈

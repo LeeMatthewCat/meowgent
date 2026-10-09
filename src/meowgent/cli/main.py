@@ -19,11 +19,11 @@ from tool import set_subagent_callback
 load_dotenv() # 讀取 .env
 
 _subagents_active_status = {}
-_subagent_lock = threading.Lock() # 防止多個執行緒同時修改 _active_subagents
+_subagent_lock = threading.Lock() # 防止多個執行緒同時修改 _subagents_active_status
 
 def on_subagent_status(subagent_id: str, stream_content: Optional[LLMResponse] = None, is_end: bool = False):
     """
-    子模型的回調參數，
+    子模型的回呼函式，
     針對 subagent_once() 傳入的狀態做輸出
     """ 
 
@@ -57,7 +57,7 @@ def on_subagent_status(subagent_id: str, stream_content: Optional[LLMResponse] =
                 ))
         # 靜態
         elif status == "thinking_done":
-            cli.console.print(cli.render_thinking_summary(stream_content.think_time))
+            cli.console.print(cli.render_thinking_summary(stream_content.think_time, subagent_id))
 
         elif status == "tool_executed":
             cli.console.print(cli.render_tool_approval_result(stream_content.tool_name, True, subagent_id))
@@ -92,7 +92,11 @@ if __name__ == "__main__":
     # ----- 初始化模型 ----
     model_name = config.models.default_model
     model = Agent(
-        OllamaProvider(model_name=model_name, temperature=config.models.temperature),
+        OllamaProvider(
+            model_name=model_name,
+            temperature=config.models.temperature,
+            context=config.models.max_context
+        ),
         max_turns=config.agent.max_turns,
         tool_approval_mode=config.agent.tool_approval_mode
     )
@@ -125,7 +129,7 @@ if __name__ == "__main__":
 
         while True: # 對話迴圈
 
-            user_input, images = get_input()
+            user_input, images = get_input(rprompt=model.get_context_status_text)
 
             if not user_input and not images: # 擋住空字串傳入
                 continue

@@ -1,6 +1,6 @@
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Callable
 import questionary
 from prompt_toolkit.styles import Style
 from pathlib import Path
@@ -40,7 +40,7 @@ class CommandCompleter(Completer):
                 if cmd.startswith(text):
                     yield Completion(cmd, start_position=-len(text))
 
-def get_input() -> Tuple[str, List[str]]:
+def get_input(rprompt: Optional[Callable] = None) -> Tuple[str, List[str]]:
 
     def _get_image_toolbar_text():
         """ 獲得加入照片的文字提示 """
@@ -75,6 +75,15 @@ def get_input() -> Tuple[str, List[str]]:
 
             finally:
                 is_updating_input = False
+    
+    def _dynamic_rprompt():
+        """ 回呼函數，用來實時取得上下文佔用文字 """
+        
+        if not rprompt:
+            return ""
+        
+        return rprompt(_prompt_session.default_buffer.text)
+        # 取得當前輸入（buffer 內）傳入 rprompt() 回傳
 
     global _prompt_session
     
@@ -90,7 +99,8 @@ def get_input() -> Tuple[str, List[str]]:
 
         _prompt_session = PromptSession(
             style=Style.from_dict({
-                "": "ansiblue"
+                "": "ansiblue",
+                "rprompt": "#888888"
             }),
             completer=CommandCompleter(),
             bottom_toolbar=_get_image_toolbar_text,
@@ -99,7 +109,7 @@ def get_input() -> Tuple[str, List[str]]:
 
         _prompt_session.default_buffer.on_text_changed += _on_text_change # 掛載清理函數
 
-    user_input =  _prompt_session.prompt("> ").strip()
+    user_input =  _prompt_session.prompt("> ", rprompt=_dynamic_rprompt).strip()
     
     # ----- 使用者輸入已結束 -----
 

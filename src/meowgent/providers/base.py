@@ -24,6 +24,7 @@ class StreamChunk:
     thinking_chunk: Optional[str] = None
     content_chunk: Optional[str] = None
     tool_calls: Optional[List[ToolCall]] = None
+    token: Optional[int] = None
 
 class LLMProvider(ABC):
     def __init__(

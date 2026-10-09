@@ -15,6 +15,12 @@ class ModelsConfig(BaseModel):
         description="溫度係數（0~1.5）"
     )
 
+    max_context: int = Field(
+        default=16384,
+        ge=0,
+        description="模型的最大上下文 token"
+    )
+
 class SubagentConfig(BaseModel):
     """ 子模型相關 """
 
