@@ -6,12 +6,11 @@ from prompt import get_system_prompt
 from typing import List, Callable, Optional, Iterator, Tuple
 import time
 from concurrent.futures import ThreadPoolExecutor
+from context import estimate_token, images_token
 
 # ----- regex 預編譯 -----
 RX_CODE_BLOCK = re.compile(r"^```json\s*|^```\s*|```$", flags=re.MULTILINE)
 RX_GET_JSON = re.compile(r'"name"\s*:\s*"([^"]+)"')
-
-RX_CJK_PATTERN = re.compile(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]')
 # -----
 
 def _extract_safe_text(
@@ -68,18 +67,6 @@ def _extract_safe_text(
 
     return "".join(safe_parts), current_tool_text, completed_tools
 
-def estimate_token(text: str) -> int:
-    """ 估算出傳入文字的 token 量 """
-    
-    # 中日韓文、全形標點
-    cjk_count = len(RX_CJK_PATTERN.findall(text))
-    
-    # 其餘字元（英文、數字、程式碼標點、半形空白等）
-    other_chars_count = len(text) - cjk_count
-
-    # 中文每字約 1.3 token，其餘每 3.5 字元約 1 token
-    return int((cjk_count * 1.3) + (other_chars_count / 3.5))
-
 class Agent():
     def __init__(self, provider: LLMProvider, max_turns: int = 20, tool_approval_mode: str = "default", tool_list: Optional[list] = None):
         self.provider = provider # 直接傳入 provider = OllamaProvider(model_name)
@@ -110,7 +97,7 @@ class Agent():
         if path is not None:
             self.path = path
 
-    def get_context_status_text(self, user_input: Optional[str] = None) -> Optional[str]:
+    def get_context_status_text(self, user_input: Optional[str] = None, images: Optional[list[str]] = None) -> Optional[str]:
         """ 獲取上下文佔用文字 """
 
         system_prompt = get_system_prompt(
@@ -130,7 +117,7 @@ class Agent():
             if self.last_system_prompt and self.last_system_prompt != system_prompt:
                 system_prompt_token_gap = estimate_token(system_prompt) - estimate_token(self.last_system_prompt) # 算出舊的跟新的差多少
 
-            input_token = estimate_token(user_input) if user_input else 0
+            input_token = (estimate_token(user_input) if user_input else 0) + images_token(images)
 
             total_token = self.true_token + system_prompt_token_gap + input_token
 
@@ -141,7 +128,7 @@ class Agent():
             for msg in self.history_messages: # 取 sys prompt，讓沒 true_token 時也可正常運行
                 total_text += msg["content"]
 
-            total_token = estimate_token(total_text)
+            total_token = estimate_token(total_text) + images_token(images)
 
         total_token_k = round(total_token / 1000, 1) # 單位轉為 k
 

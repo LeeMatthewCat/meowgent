@@ -41,7 +41,7 @@ class CommandCompleter(Completer):
                     yield Completion(cmd, start_position=-len(text))
 
 def get_input(rprompt: Optional[Callable] = None) -> Tuple[str, List[str]]:
-
+    
     def _get_image_toolbar_text():
         """ 獲得加入照片的文字提示 """
         if not attached_images:
@@ -82,7 +82,7 @@ def get_input(rprompt: Optional[Callable] = None) -> Tuple[str, List[str]]:
         if not rprompt:
             return ""
         
-        return rprompt(_prompt_session.default_buffer.text)
+        return rprompt(_prompt_session.default_buffer.text, attached_images)
         # 取得當前輸入（buffer 內）傳入 rprompt() 回傳
 
     global _prompt_session
