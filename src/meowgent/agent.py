@@ -294,6 +294,9 @@ class Agent():
                         tools_result.append((err_tool, f"[系統提示] 工具調用格式解析錯誤：{e}。請確保 <tool_call> 內嚴格為合法 JSON 格式。"))
 
             if tools_result: # 表示有 tool use 需求
+
+                interrupted = False
+
                 self.history_messages.append({
                     "role": "assistant",
                     "content": result_full_text
@@ -302,12 +305,28 @@ class Agent():
                 for t, tool_v in tools_result:
                     # t 為 ToolCall
                     # tool_v 為 Future 物件（執行中任務）或 str（被拒絕/出錯的提示字串）
+
+                    if interrupted: # 前面工具已取消 -> 後面工具也取消
+                        self.history_messages.append({
+                            "role": "user",
+                            "content": f"<tool_response>\n[工具 {t.tool_name} 執行結果]：\n[系統提示] 前序操作已被使用者手動中止，此工具已取消執行。\n</tool_response>"
+                        })
+                        continue
                     
-                    if hasattr(tool_v, "result"): # 檢查是否有 .result() 可用
-                        result = tool_v.result()
-                        is_success = True
-                    else:
-                        result = tool_v
+                    try:
+                        if hasattr(tool_v, "result"): # 檢查是否有 .result() 可用
+                            result = tool_v.result()
+                            is_success = True
+                        else:
+                            result = tool_v
+                            is_success = False
+
+                    except KeyboardInterrupt:
+
+                        interrupted = True
+
+                        result = "[系統提示] 工具執行已被使用者手動中止（KeyboardInterrupt）。"
+                        
                         is_success = False
 
                     self.history_messages.append({
@@ -317,6 +336,15 @@ class Agent():
 
                     status = "tool_executed" if is_success else "tool_rejected"
                     yield LLMResponse(status=status, tool_name=t.tool_name)
+
+                if interrupted:
+                    self.history_messages.append({
+                        "role": "assistant",
+                        "content": "已停止執行後續操作。"
+                    }) # 上一個訊息是 role 為 user 的 [系統提示] 工具執行已被使用者手動中止（KeyboardInterrupt）
+                    # 防止接下來的使用者輸入跟它角色重疊
+
+                    raise KeyboardInterrupt # 處理完了，重新拋出例外，否則會繼續下一個 while 迴圈
       
             else: # 沒有 tool use 需求，生成最終回答
                 if not result_full_text.strip():
@@ -326,7 +354,5 @@ class Agent():
                     "role": "assistant",
                     "content": result_full_text
                 })
-
-                
 
                 break # 模型沒有調用工具 -> 表示已經生成最終回答，故退出 while turns < self.max_turns: 迴圈

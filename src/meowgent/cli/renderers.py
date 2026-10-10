@@ -54,18 +54,18 @@ class ResponseStreamer:
         self.cache = ""
         self.last_len = 0
         
-    def clean(self, live:Live):
+    def clean(self, live:Live, rule: bool = True):
         """ 清除最後留在 live 的內容（轉為 console.print()）"""
+
+        live.update("")
 
         if self.cache.strip():
 
-            live.update("")
-            self.console.print(
-                Group(
-                    Padding(Markdown(self.cache), (0, 0, 0, 2)),
-                    self.render.get_rule()
-                )
-            )
+            render_items = [Padding(Markdown(self.cache), (0, 0, 0, 2))]
+            if rule:
+                render_items.append(self.render.get_rule())
+
+            self.console.print(Group(*render_items))
 
         self.cache = ""
         self.last_len = 0
@@ -173,3 +173,6 @@ class CLIRenderer:
 
     def render_subagent_end(self, subagent_id: str) -> Padding:
         return Padding(f"[green]✔ {escape(f'[{subagent_id}]')} 任務已完成[/green]", (0, 0, 0, 2))
+
+    def render_keyboard_interrupt_end(self):
+        return Padding("[yellow]已中斷當前操作。[/yellow]", (0, 0, 0, 2))

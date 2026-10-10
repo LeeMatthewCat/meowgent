@@ -150,32 +150,50 @@ if __name__ == "__main__":
 
             response_streamer = cli.get_response_streamer()
 
+            history_checkpoint = len(model.history_messages)
+
             with cli.get_live() as live: # live 版面 
 
-                for stream_content in model.chat(user_input=user_input, tool_approval=ask_tool_approval, images=images):
-                    # ask_tool_approval() 的執行權在 agent.py 上
+                try:
+                    for stream_content in model.chat(user_input=user_input, tool_approval=ask_tool_approval, images=images):
+                        # ask_tool_approval() 的執行權在 agent.py 上
 
-                    if stream_content.status == "thinking": # 輸出推理內容
-                        live.update(cli.render_single_line_streamer(stream_content.content))
+                        if stream_content.status == "thinking": # 輸出推理內容
+                            live.update(cli.render_single_line_streamer(stream_content.content))
 
-                    elif stream_content.status == "thinking_done": # 清除推理內容，輸出推理總結
-                        live.update("") # 清除推理內容及隔線
-                        cli.console.print(cli.render_thinking_summary(stream_content.think_time))
-                        
-                    elif stream_content.status == "tool_calling": # 輸出工具參數生成跑馬燈
-                        live.update(cli.render_single_line_streamer(stream_content.content))
+                        elif stream_content.status == "thinking_done": # 清除推理內容，輸出推理總結
+                            live.update("") # 清除推理內容及隔線
+                            cli.console.print(cli.render_thinking_summary(stream_content.think_time))
+                            
+                        elif stream_content.status == "tool_calling": # 輸出工具參數生成跑馬燈
+                            live.update(cli.render_single_line_streamer(stream_content.content))
 
-                    elif stream_content.status == "response": # 輸出模型回答內容
-                        response_streamer.update_content(full_text=stream_content.content, live=live)
+                        elif stream_content.status == "response": # 輸出模型回答內容
+                            response_streamer.update_content(full_text=stream_content.content, live=live)
 
-                    elif stream_content.status == "tool_executed": # 輸出工具調用成功
-                        response_streamer.reset(live=live) # 歸零長度記帳，文字不被吞掉
-                        cli.console.print(cli.render_tool_approval_result(stream_content.tool_name, True))
+                        elif stream_content.status == "tool_executed": # 輸出工具調用成功
+                            response_streamer.reset(live=live) # 歸零長度記帳，文字不被吞掉
+                            cli.console.print(cli.render_tool_approval_result(stream_content.tool_name, True))
 
-                    elif stream_content.status == "tool_rejected": # 輸出工具調用失敗
-                        response_streamer.reset(live=live) # 歸零長度記帳，文字不被吞掉
-                        cli.console.print(cli.render_tool_approval_result(stream_content.tool_name, False))
+                        elif stream_content.status == "tool_rejected": # 輸出工具調用失敗
+                            response_streamer.reset(live=live) # 歸零長度記帳，文字不被吞掉
+                            cli.console.print(cli.render_tool_approval_result(stream_content.tool_name, False))
 
-                response_streamer.clean(live=live)
+                    response_streamer.clean(live=live)
+                
+                except KeyboardInterrupt:
+
+                    response_streamer.clean(live=live, rule=False) 
+
+                    # 若中斷時連一輪工具都沒完成（只多了一則 user 訊息），將其回滾抹除
+                    if len(model.history_messages) == history_checkpoint + 1:
+                        model.history_messages = model.history_messages[:history_checkpoint]
+
+                    cli.console.print(cli.render_keyboard_interrupt_end())
+
+                    cli.console.print(cli.get_rule())
+
+                    continue # 重新等待下一次使用者輸入
+
     finally:
         clean_ollama(process) # 清除 ollama 進程
