@@ -13,7 +13,11 @@ class ToolCall:
 
 @dataclass
 class LLMResponse:
-    status: Literal["response", "thinking", "thinking_done", "tool_calling", "tool_executed", "tool_rejected"]
+    status: Literal[
+        "response", "thinking", "thinking_done",
+        "tool_calling", "tool_executed", "tool_rejected",
+        "compacting", "compact_done", "compact_fail"
+    ]
     content: Optional[str] = None
     think_time: Optional[float] = None
     tool_name: Optional[str] = None

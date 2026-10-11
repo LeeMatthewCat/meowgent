@@ -179,6 +179,18 @@ if __name__ == "__main__":
                             response_streamer.reset(live=live) # 歸零長度記帳，文字不被吞掉
                             cli.console.print(cli.render_tool_approval_result(stream_content.tool_name, False))
 
+                        # 上下文壓縮
+                        elif stream_content.status == "compacting":
+                            live.update(cli.render_compaction_spinner())
+
+                        elif stream_content.status == "compact_done":
+                            live.update("")
+                            cli.console.print(cli.render_compaction_end())
+
+                        elif stream_content.status == "compact_fail":
+                            live.update("")
+                            cli.console.print(cli.render_compaction_fail())
+
                     response_streamer.clean(live=live)
                 
                 except KeyboardInterrupt:

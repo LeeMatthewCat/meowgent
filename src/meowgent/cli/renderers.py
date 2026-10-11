@@ -6,6 +6,7 @@ from rich.padding import Padding
 from rich.cells import cell_len
 from rich.spinner import Spinner
 from rich.markup import escape
+from typing import Optional, Tuple
 
 class ResponseStreamer: 
     def __init__(self, renderer: "CLIRenderer"):
@@ -176,3 +177,20 @@ class CLIRenderer:
 
     def render_keyboard_interrupt_end(self):
         return Padding("[yellow]已中斷當前操作。[/yellow]", (0, 0, 0, 2))
+
+    def render_compaction_spinner(self) -> Group:
+        """ 渲染上下文壓縮時的轉圈圈動畫 """
+        return Group(Padding(Spinner("dots", text="[dim]正在進行對話歷史壓縮...[/dim]"), (0, 0, 0, 2)), self.get_rule())
+    
+    def render_compaction_end(self, precentage: Optional[Tuple[float, float]] = None) -> Group:
+        """ 壓縮完成的提示 """
+        if precentage:
+            old, new = precentage
+            text = f"[dim]{escape(f'[{old}→{new}]')}[/dim]"
+        else:
+            text = ""
+
+        return Group(Padding(f"[green]✔ 對話歷史已完成壓縮！[/green]{text}", (0, 0, 0, 2)), self.get_rule())
+
+    def render_compaction_fail(self) -> Group:
+        return Group(Padding("[yellow]對話輪數仍在近期保護區內，無需壓縮。[/yellow]", (0, 0, 0, 2)), self.get_rule())

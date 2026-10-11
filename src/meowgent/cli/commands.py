@@ -13,9 +13,8 @@ import inspect
 from rich.panel import Panel
 from pydantic import BaseModel, ValidationError
 from typing import get_origin, get_args, Literal, Optional, TYPE_CHECKING
-from questionary.prompts.common import InquirerControl
-from prompt_toolkit.layout import Layout
-import subprocess
+from context import macro_compaction
+from rich.markup import escape
 
 if TYPE_CHECKING:
     from agent import Agent
@@ -306,4 +305,31 @@ def _change_config(cli: CLIRenderer, config: MeowgentConfig, model_object: Agent
         cli.console.print(Padding(f"[green]{desc} 由 {now_value} 更新至 {new_value}[/green]", (0, 0, 0, 2)))
 
     else:
-        cli.console.print(Padding(f"[dim]設定未變更[/dim]", (0, 0, 0, 2)))     
+        cli.console.print(Padding(f"[dim]設定未變更[/dim]", (0, 0, 0, 2)))
+
+@cmd_registry("/compact")
+def _compaction(cli: CLIRenderer, model_object: Agent, **kwargs):
+    """ 強制呼叫模型進行上下文壓縮 """
+
+    old_len = len(model_object.history_messages)
+    old_percentage = model_object.context_percentage
+
+    with cli.get_live() as live:
+        live.update(cli.render_compaction_spinner())
+
+        model_object.history_messages = macro_compaction(history_messages=model_object.history_messages)
+
+    if len(model_object.history_messages) < old_len:
+
+        model_object.true_token = None
+
+        model_object.get_context_status_text()
+
+        live.update("")
+        cli.console.print(cli.render_compaction_end(
+            precentage=(old_percentage, model_object.context_percentage)
+        ))
+
+    else:
+        live.update("")
+        cli.console.print(cli.render_compaction_fail())

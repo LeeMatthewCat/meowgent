@@ -6,7 +6,7 @@ from prompt import get_system_prompt
 from typing import List, Callable, Optional, Iterator, Tuple
 import time
 from concurrent.futures import ThreadPoolExecutor
-from context import estimate_token, images_token
+from context import estimate_token, images_token, pruner_tool_text, macro_compaction
 
 # ----- regex 預編譯 -----
 RX_CODE_BLOCK = re.compile(r"^```json\s*|^```\s*|```$", flags=re.MULTILINE)
@@ -82,6 +82,7 @@ class Agent():
         self.executor = ThreadPoolExecutor(max_workers=4) # 任務池（同步處理工具調用
 
         self.true_token: Optional[int] = None
+        self.context_percentage: float = 0.0
         self.last_system_prompt: Optional[str] = None # 記錄上次生效的提示詞
 
     def renew_system_prompt(self,rule: Optional[str] = None, model_name: Optional[str] = None, path: Optional[str] = None):
@@ -132,9 +133,9 @@ class Agent():
 
         total_token_k = round(total_token / 1000, 1) # 單位轉為 k
 
-        percentage = round((total_token / max_context) * 100, 1)
+        self.context_percentage = round((total_token / max_context) * 100, 1)
         
-        return f"[{total_token_k}k/{max_context_k}k] {percentage}%"
+        return f"[{total_token_k}k/{max_context_k}k] {self.context_percentage}%"
         
     def chat(self, user_input: str, tool_approval: Callable[[str, dict], bool], images: Optional[List[str]] = None) -> Iterator[LLMResponse]:
         
@@ -343,3 +344,32 @@ class Agent():
                 })
 
                 break # 模型沒有調用工具 -> 表示已經生成最終回答，故退出 while turns < self.max_turns: 迴圈
+
+        # 裁剪壓縮上下文
+        token_before = estimate_token("".join(m["content"] for m in self.history_messages))
+
+        self.history_messages = pruner_tool_text(self.history_messages)
+
+        token_gap = token_before - estimate_token("".join(m["content"] for m in self.history_messages))
+
+        if token_gap > 0 and self.true_token: # 有壓縮 -> 更新 token
+            self.true_token -= token_gap
+
+        # 語意壓縮上下文
+        self.get_context_status_text() # 獲取上下文佔比
+
+        if self.context_percentage > 75:
+            yield (LLMResponse(status="compacting"))
+
+            old_len = len(self.history_messages)
+
+            self.history_messages = macro_compaction(history_messages=self.history_messages)
+
+            if len(self.history_messages) < old_len: # 有壓縮 -> 更新 token
+
+                self.true_token = None # 沒有 true_token -> 走到 get_context_status_text() 的 else 全部用估計的
+
+                yield LLMResponse(status="compact_done")
+
+            else:
+                yield LLMResponse(status="compact_fail")

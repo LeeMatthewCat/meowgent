@@ -1,11 +1,11 @@
-from typing import List, Tuple
+from typing import List
 import re
 
 RX_TOOL_RESPONSE = re.compile(
     r"<tool_response>\s*\[工具\s*(\w+)\s*執行結果\]：\n([\s\S]*?)\n</tool_response>"
 )
 
-def _turn_separation(history_messages: List[dict]) -> List[int]:
+def turn_separation(history_messages: List[dict]) -> List[int]:
     """ 得到為使用者輸入的索引 """
 
     turn_indices = []
@@ -21,9 +21,13 @@ def _turn_separation(history_messages: List[dict]) -> List[int]:
 
 def pruner_tool_text(history_messages: List[dict], keep_turns: int = 2):
     """
+    把 keep_turns 輪以前的工具調用做裁剪
+    針對：
+    1. 大於 6 行 -> 留前三後二
+    2. 大於 300 字 -> 留前後 50
     """
 
-    turn_indices = _turn_separation(history_messages)
+    turn_indices = turn_separation(history_messages)
 
     if len(turn_indices) <= keep_turns: # 還不需要裁剪
         return history_messages
@@ -60,6 +64,8 @@ def pruner_tool_text(history_messages: List[dict], keep_turns: int = 2):
                     f"... [省略前期工具 {tool_name} 的部分輸出]\n"
                     f"{tail}"
                 )
+
+            # 檢查字數 -> 超過，留前後 50
             elif len(raw_result) > 300:
 
                 head = raw_result[:50]
