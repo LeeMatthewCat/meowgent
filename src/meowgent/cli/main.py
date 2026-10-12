@@ -7,7 +7,7 @@ if TYPE_CHECKING:
 from pathlib import Path
 import sys
 
-BASE_DIR = Path(__file__).resolve().parent # 取得 src/meowgent 位置
+BASE_DIR = Path(__file__).resolve().parent.parent # 取得 src/meowgent 位置
 
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
