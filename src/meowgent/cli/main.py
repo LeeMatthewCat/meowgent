@@ -132,8 +132,12 @@ def main():
     try:
 
         while True: # 對話迴圈
+            try:
+                user_input, images = get_input(rprompt=model.get_context_status_text)
+            except (KeyboardInterrupt, EOFError):
+                cli.console.print(cli.render_end())
 
-            user_input, images = get_input(rprompt=model.get_context_status_text)
+                sys.exit(0)
 
             if not user_input and not images: # 擋住空字串傳入
                 continue
